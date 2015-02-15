@@ -1,0 +1,5 @@
+# plprofiler extension control file
+comment = 'server-side support for profiling PL/pgSQL functions'
+default_version = '1.0'
+module_pathname = '$libdir/plprofiler'
+relocatable = true

@@ -1,0 +1,53 @@
+This extension implements performance profiling for PLpgSQL code. 
+
+Supported PostgreSQL versions
+---------------------------------------------------------------------------------
+plprofiler strives to support as many community-supported major versions of 
+Postgres as possible. Currently, the following versions of PostgreSQL are 
+supported:
+
+9.2, 9.3, 9.4
+
+Note: Older versions may work, but they have not been tested
+
+Usage
+---------------------------------------------------------------------------------
+Once installed, creates the following objects.
+
+pl_profiler view
+----------------
+
+Summarizes profile of each function executed. Each entry represents a line of 
+PLpgSQL code in a function. 
+
++---------------------+------------------+---------------------------------------------------------------------+
+| Name                | Type             | Description                                                         |
++=====================+==================+=====================================================================+
+| func_oid            | oid              | OID of the function profiled                                        |
++---------------------+------------------+---------------------------------------------------------------------+
+| line_number         | bigint           | line of the source within the function                              |
++---------------------+------------------+---------------------------------------------------------------------+
+| line                | text             | Text of the line of function code                                   |
++---------------------+------------------+---------------------------------------------------------------------+
+| exec_count          | bigint           | Number of times executed                                            |
++---------------------+------------------+---------------------------------------------------------------------+
+| total_time          | bigint           | Total time spent in execution, in microseconds                      |
++---------------------+------------------+---------------------------------------------------------------------+
+| longest_time        | bigint           | The time in microseconds of the longest time the line was executed  |
++---------------------+------------------+---------------------------------------------------------------------+
+
+pl_profiler_reset function
+--------------------------
+
+Can be called by users to reset the contents of the pl_profiler view
+
+pl_profiler_enable function
+---------------------------
+
+Used to enable the profiler for the current session
+
+License
+---------------------------------------------------------------------------------
+plprofiler is released under the Artistic License.
+
+    http://www.opensource.org/licenses/artistic-license.php
