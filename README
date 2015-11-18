@@ -3,12 +3,11 @@ This extension implements performance profiling for PLpgSQL code.
 Supported PostgreSQL versions
 ---------------------------------------------------------------------------------
 plprofiler strives to support as many community-supported major versions of 
-Postgres as possible. Currently, the following versions of PostgreSQL are 
+Postgres as reasonable. Currently, the following versions of PostgreSQL are 
 supported:
 
-9.2, 9.3, 9.4
+9.2 - 9.5
 
-Note: Older versions may work, but they have not been tested
 
 Usage
 ---------------------------------------------------------------------------------
