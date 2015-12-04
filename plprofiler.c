@@ -505,6 +505,7 @@ entry_alloc(lineHashKey *key, const char *line, int line_len)
 {
         lineEntry  *entry;
         bool       found;
+        int        entry_len;
 
         if (hash_get_num_entries(line_stats) >= plprofiler_max)
                 return NULL;
@@ -520,10 +521,20 @@ entry_alloc(lineHashKey *key, const char *line, int line_len)
                 memset(&entry->counters, 0, sizeof(Counters));
 
                 /* ... and don't forget the line text */
-                Assert(line_len >= 0 && line_len < plprofiler_len);
-                entry->line_len = line_len;
-                memcpy(entry->line, line, line_len);
-                entry->line[line_len] = '\0';
+                Assert(line_len >= 0);
+                if (line_len > plprofiler_len)
+                {
+                    ereport(LOG, (errcode(ERRCODE_SUCCESSFUL_COMPLETION),
+                                    errmsg("Procedural language function line length exceeds plprofiler.line_length: %d ",plprofiler_len),
+                                        errhint("Set plprofiler.line_length to %d or greater", line_len)));
+                    entry_len = plprofiler_len;
+                }
+                else 
+                    entry_len = line_len;
+
+                entry->line_len = entry_len;
+                memcpy(entry->line, line, entry_len);
+                entry->line[entry_len] = '\0';
         }
 
         return entry;
