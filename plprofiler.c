@@ -5,7 +5,7 @@
  *
  *	  Profiling plugin for PL/pgSQL instrumentation
  *
- * Copyright (c) 2014-2015, BigSQL
+ * Copyright (c) 2014-2016, BigSQL
  * Copyright (c) 2008-2014, PostgreSQL Global Development Group
  * Copyright 2006,2007 - EnterpriseDB, Inc.
  *
@@ -80,15 +80,14 @@ typedef struct lineEntry
 {
         lineHashKey key;       /* hash key of entry - MUST BE FIRST */
         Counters    counters;  /* the statistics for this line */
-        int         line_len;  /* # of valid bytes in line string */
-        char        line[1];   /* VARIABLE LENGTH ARRAY - MUST BE LAST */
+        char       *line;      /* line source text */
 } lineEntry;
 
+static MemoryContext profiler_mcxt = NULL;
 static HTAB *line_stats = NULL;
 static bool enabled     = false;
 
 static int  plprofiler_max;    /* max # lines to track */
-static int  plprofiler_len;    /* max lenght of a line to track */
 
 PLpgSQL_plugin **plugin_ptr = NULL;
 
@@ -121,7 +120,7 @@ static int   scanSource( const char * dst[], const char * src );
 static void  InitHashTable(void);
 static uint32 line_stats_fn(const void *key, Size keysize);
 static int    line_match_fn(const void *key1, const void *key2, Size keysize);
-static lineEntry *entry_alloc(lineHashKey *key, const char *line, int line_len);	
+static lineEntry *entry_alloc(lineHashKey *key, const char *line);
 
 /**********************************************************************
  * Exported Function definitions
@@ -143,20 +142,6 @@ void _PG_init( void )
                                                         NULL,
                                                         NULL,
                                                         NULL);
-
-        DefineCustomIntVariable("plprofiler.line_length",
-          "Sets the maximum length of each line of code tracked by plprofiler.",
-                                                        NULL,
-                                                        &plprofiler_len,
-                                                        256,
-                                                        24,
-                                                        2048,
-                                                        PGC_USERSET,
-                                                        0,
-                                                        NULL,
-                                                        NULL,
-                                                        NULL);
-
 
         plugin_ptr = (PLpgSQL_plugin **) find_rendezvous_variable("PLpgSQL_plugin");
 
@@ -290,12 +275,7 @@ static void profiler_func_end( PLpgSQL_execstate * estate, PLpgSQL_function * fu
 
                 if (!entry)
                 {
-                    int line_len = strlen(profilerInfo->sourceLines[lineNo]);
-                    char line[plprofiler_len];
-
-                    snprintf(line, plprofiler_len - 1, "%s", profilerInfo->sourceLines[lineNo]);
-
-                    entry = entry_alloc(&key, line, line_len);
+                    entry = entry_alloc(&key, profilerInfo->sourceLines[lineNo]);
                     if (!entry) 
                     {
                           elog( ERROR, "Unable to allocate more space for the profiler. ");
@@ -484,12 +464,18 @@ InitHashTable(void)
 {
         HASHCTL         hash_ctl;
 
+		profiler_mcxt = AllocSetContextCreate(TopMemoryContext,
+											  "PL/pgSQL profiler",
+											  ALLOCSET_DEFAULT_MINSIZE,
+											  ALLOCSET_DEFAULT_INITSIZE,
+											  ALLOCSET_DEFAULT_MAXSIZE);
         MemSet(&hash_ctl, 0, sizeof(hash_ctl));
 
         hash_ctl.keysize = sizeof(lineHashKey);
-        hash_ctl.entrysize = offsetof(lineEntry, line) + plprofiler_len;
+        hash_ctl.entrysize = sizeof(lineEntry);
         hash_ctl.hash = line_stats_fn;
         hash_ctl.match = line_match_fn;
+		hash_ctl.hcxt = profiler_mcxt;
 
         line_stats = hash_create("Function Lines", 
                                  plprofiler_max, 
@@ -520,11 +506,11 @@ line_match_fn(const void *key1, const void *key2, Size keysize)
 }
 
 static lineEntry *
-entry_alloc(lineHashKey *key, const char *line, int line_len)
+entry_alloc(lineHashKey *key, const char *line)
 {
+		MemoryContext old_cxt;
         lineEntry  *entry;
         bool       found;
-        int        entry_len;
 
         if (hash_get_num_entries(line_stats) >= plprofiler_max)
                 return NULL;
@@ -540,20 +526,11 @@ entry_alloc(lineHashKey *key, const char *line, int line_len)
                 memset(&entry->counters, 0, sizeof(Counters));
 
                 /* ... and don't forget the line text */
-                Assert(line_len >= 0);
-                if (line_len > plprofiler_len)
-                {
-                    ereport(LOG, (errcode(ERRCODE_SUCCESSFUL_COMPLETION),
-                                    errmsg("Procedural language function line length exceeds plprofiler.line_length: %d ",plprofiler_len),
-                                        errhint("Set plprofiler.line_length to %d or greater", line_len)));
-                    entry_len = plprofiler_len;
-                }
-                else 
-                    entry_len = line_len;
-
-                entry->line_len = entry_len;
-                memcpy(entry->line, line, entry_len);
-                entry->line[entry_len] = '\0';
+				old_cxt = MemoryContextSwitchTo(profiler_mcxt);
+                entry->line = pstrdup(line);
+				MemoryContextSwitchTo(old_cxt);
+				if (entry->line == NULL)
+					elog(ERROR, "out of memory in plprofiler");
         }
 
         return entry;
@@ -633,19 +610,14 @@ pl_profiler(PG_FUNCTION_ARGS)
 Datum
 pl_profiler_reset(PG_FUNCTION_ARGS)
 {
-        HASH_SEQ_STATUS hash_seq;
-        lineEntry  *entry;
-
-        if (!line_stats)
+        if (!line_stats || !profiler_mcxt)
                 ereport(ERROR,
                                 (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
                                  errmsg("pl_profiler must be loaded")));
 
-        hash_seq_init(&hash_seq, line_stats);
-        while ((entry = hash_seq_search(&hash_seq)) != NULL)
-        {
-                hash_search(line_stats, &entry->key, HASH_REMOVE, NULL);
-        }
+		MemoryContextDelete(profiler_mcxt);
+		profiler_mcxt = NULL;
+		line_stats = NULL;
 
         PG_RETURN_VOID();
 }
