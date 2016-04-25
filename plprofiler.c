@@ -199,6 +199,13 @@ static void profiler_init( PLpgSQL_execstate * estate, PLpgSQL_function * func )
 	profilerCtx * profilerInfo;
 	char		* procSrc;
 
+		/*
+		 * Anonymous code blocks do not have function source code
+		 * that we can lookup in pg_proc. For now we ignore them.
+		 */
+        if (func->fn_oid == InvalidOid)
+            return;
+
         if (!enabled)
             return;
 
@@ -254,6 +261,10 @@ static void profiler_func_end( PLpgSQL_execstate * estate, PLpgSQL_function * fu
 {
 	profilerCtx * profilerInfo;
 	int           lineNo;
+
+		/* Ignore anonymous code block. */
+        if (estate->plugin_info == NULL)
+            return;
 
         if (!enabled)
             return;
@@ -319,6 +330,10 @@ static void profiler_stmt_beg( PLpgSQL_execstate * estate, PLpgSQL_stmt * stmt )
 	stmt_stats     * stats;
         profilerCtx    * profilerInfo;
 
+		/* Ignore anonymous code block. */
+        if (estate->plugin_info == NULL)
+            return;
+
         if (!enabled)
             return;
 
@@ -347,6 +362,10 @@ static void profiler_stmt_end( PLpgSQL_execstate * estate, PLpgSQL_stmt * stmt )
         profilerCtx * profilerInfo;
 	instr_time    end_time;
         uint64        elapsed;
+
+		/* Ignore anonymous code block. */
+        if (estate->plugin_info == NULL)
+            return;
 
         if (!enabled)
             return;
