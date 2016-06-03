@@ -40,6 +40,10 @@ CREATE VIEW pl_profiler AS
     FROM pl_profiler()
    ORDER BY func_oid, line_number;
 
+CREATE VIEW pl_callgraph AS
+  SELECT *
+    FROM pl_callgraph();
+
 GRANT SELECT ON pl_profiler TO PUBLIC;
 GRANT EXECUTE ON FUNCTION pl_profiler_reset() TO PUBLIC;
 GRANT EXECUTE ON FUNCTION pl_profiler_enable(bool) TO PUBLIC;
