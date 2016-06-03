@@ -105,7 +105,8 @@ typedef struct callGraphEntry
 static MemoryContext	profiler_mcxt = NULL;
 static MemoryContext	temp_mcxt = NULL;
 static HTAB			   *line_stats = NULL;
-static bool				enabled = false;
+
+static bool				profiler_enabled = false;
 
 static HTAB			   *callGraph_stats = NULL;
 static callGraphKey		graph_stack;
@@ -171,6 +172,14 @@ static PLpgSQL_plugin plugin_funcs = {
 void
 _PG_init(void)
 {
+	DefineCustomBoolVariable("plprofiler.enabled",
+							"Enable or disable plprofiler by default",
+							NULL,
+							&profiler_enabled,
+							false,
+							PGC_USERSET, 0,
+							NULL, NULL, NULL);
+
 	DefineCustomIntVariable("plprofiler.max_lines",
 							"Sets the maximum number of procedural "
 							"lines of code tracked by plprofiler.",
@@ -234,7 +243,7 @@ profiler_init(PLpgSQL_execstate *estate, PLpgSQL_function *func )
 	if (func->fn_oid == InvalidOid)
 		return;
 
-	if (!enabled)
+	if (!profiler_enabled)
 		return;
 
 	/*
@@ -284,7 +293,7 @@ profiler_func_beg(PLpgSQL_execstate *estate, PLpgSQL_function *func)
 	if (estate->plugin_info == NULL)
 		return;
 
-	if (!enabled)
+	if (!profiler_enabled)
 		return;
 
 	/*
@@ -339,7 +348,7 @@ profiler_func_end(PLpgSQL_execstate *estate, PLpgSQL_function *func)
 	if (estate->plugin_info == NULL)
 		return;
 
-	if (!enabled)
+	if (!profiler_enabled)
 		return;
 
 	if (!line_stats)
@@ -418,7 +427,7 @@ profiler_stmt_beg(PLpgSQL_execstate *estate, PLpgSQL_stmt *stmt)
 	if (estate->plugin_info == NULL)
 		return;
 
-	if (!enabled)
+	if (!profiler_enabled)
 		return;
 
 	profilerInfo = (profilerCtx *)estate->plugin_info;
@@ -451,7 +460,7 @@ profiler_stmt_end(PLpgSQL_execstate *estate, PLpgSQL_stmt *stmt)
 	if (estate->plugin_info == NULL)
 		return;
 
-	if (!enabled)
+	if (!profiler_enabled)
 		return;
 
 	INSTR_TIME_SET_CURRENT(end_time);
@@ -919,10 +928,10 @@ pl_profiler_enable(PG_FUNCTION_ARGS)
 	if (PG_ARGISNULL(0))
 		PG_RETURN_NULL();
 
-	enabled = PG_GETARG_BOOL(0);
+	profiler_enabled = PG_GETARG_BOOL(0);
 
-	if (enabled && !line_stats)
+	if (profiler_enabled && !line_stats)
 		InitHashTable();
 
-	PG_RETURN_BOOL(enabled);
+	PG_RETURN_BOOL(profiler_enabled);
 }
