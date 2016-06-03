@@ -38,7 +38,9 @@
 
 PG_MODULE_MAGIC;
 
-#define PL_PROFILE_COLS 6
+#define PL_PROFILE_COLS		6
+#define PL_CALLGRAPH_COLS	5
+#define PL_MAX_STACK_DEPTH	100
 
 /**********************************************************************
  * Type and structure definitions
@@ -83,15 +85,41 @@ typedef struct lineEntry
 	char		   *line;			/* line source text */
 } lineEntry;
 
-static MemoryContext profiler_mcxt = NULL;
-static HTAB		   *line_stats = NULL;
-static bool			enabled = false;
+typedef struct callGraphKey
+{
+	Oid				stack[PL_MAX_STACK_DEPTH];
+} callGraphKey;
 
-static int			plprofiler_max; /* max # lines to track */
+typedef struct callGraphEntry
+{
+    callGraphKey	key;
+	PgStat_Counter	callCount;
+	uint64			totalTime;
+	uint64			childTime;
+	uint64			selfTime;
+} callGraphEntry;
+
+/*
+ * Local variables
+ */
+static MemoryContext	profiler_mcxt = NULL;
+static MemoryContext	temp_mcxt = NULL;
+static HTAB			   *line_stats = NULL;
+static bool				enabled = false;
+
+static HTAB			   *callGraph_stats = NULL;
+static callGraphKey		graph_stack;
+static instr_time		graph_stack_entry[PL_MAX_STACK_DEPTH];
+static uint64			graph_stack_child_time[PL_MAX_STACK_DEPTH];
+static int				graph_stack_pt = 0;
+static TransactionId	graph_current_xid = InvalidTransactionId;
+
+static int			plprofiler_max;			/* max # lines to track */
 
 PLpgSQL_plugin	  **plugin_ptr = NULL;
 
 Datum pl_profiler(PG_FUNCTION_ARGS);
+Datum pl_callgraph(PG_FUNCTION_ARGS);
 Datum pl_profiler_reset(PG_FUNCTION_ARGS);
 Datum pl_profiler_enable(PG_FUNCTION_ARGS);
 
@@ -121,9 +149,13 @@ static char *findSource(Oid oid, HeapTuple *tup, char **funcName);
 static char *copyLine(const char * src, size_t len);
 static int scanSource(const char * dst[], const char *src);
 static void InitHashTable(void);
-static uint32 line_stats_fn(const void *key, Size keysize);
+static uint32 line_hash_fn(const void *key, Size keysize);
 static int line_match_fn(const void *key1, const void *key2, Size keysize);
+static uint32 callGraph_hash_fn(const void *key, Size keysize);
+static int callGraph_match_fn(const void *key1, const void *key2, Size keysize);
 static lineEntry *entry_alloc(lineHashKey *key, const char *line);
+static void callGraph_collect(uint64 us_elapsed, uint64 us_self,
+							  uint64 us_children);
 
 /**********************************************************************
  * Exported Function definitions
@@ -246,6 +278,45 @@ profiler_init(PLpgSQL_execstate *estate, PLpgSQL_function *func )
 static void
 profiler_func_beg(PLpgSQL_execstate *estate, PLpgSQL_function *func)
 {
+	TransactionId	current_xid;
+
+	/* Ignore anonymous code block. */
+	if (estate->plugin_info == NULL)
+		return;
+
+	if (!enabled)
+		return;
+
+	/*
+	 * At entry time of a function we push it onto the graph call stack
+	 * and remember the entry time.
+	 */
+	current_xid = GetCurrentTransactionId();
+
+	if (graph_stack_pt > 0 && graph_current_xid != current_xid)
+	{
+		/*
+		 * We have a call stack but it started in another transaction.
+		 * This only happens when a transaction aborts and the call stack
+		 * is not properly unwound down to zero depth. Start from scratch.
+		 */
+		memset(&graph_stack, 0, sizeof(graph_stack));
+		graph_stack_pt = 0;
+	}
+	graph_current_xid = current_xid;
+
+	/*
+	 * If we are below the maximum call stack depth, set up another level.
+	 * Push this function Oid onto the stack, remember the entry time and
+	 * set the time spent in children to zero.
+	 */
+	if (graph_stack_pt < PL_MAX_STACK_DEPTH)
+	{
+		graph_stack.stack[graph_stack_pt] = func->fn_oid;
+		INSTR_TIME_SET_CURRENT(graph_stack_entry[graph_stack_pt]);
+		graph_stack_child_time[graph_stack_pt] = 0;
+	}
+	graph_stack_pt++;
 }
 
 /* -------------------------------------------------------------------
@@ -260,6 +331,9 @@ profiler_func_end(PLpgSQL_execstate *estate, PLpgSQL_function *func)
 {
 	profilerCtx	   *profilerInfo;
 	int				lineNo;
+	instr_time		now;
+	uint64			us_elapsed;
+	uint64			us_self;
 
 	/* Ignore anonymous code block. */
 	if (estate->plugin_info == NULL)
@@ -305,6 +379,23 @@ profiler_func_end(PLpgSQL_execstate *estate, PLpgSQL_function *func)
 
 		entry = NULL;
 	}
+
+	/* At function exit we collect the call graphs. */
+    if (graph_stack_pt <= 0)
+		elog(ERROR, "pl_callgraph stack underrun");
+
+	graph_stack_pt--;
+	INSTR_TIME_SET_CURRENT(now);
+	INSTR_TIME_SUBTRACT(now, graph_stack_entry[graph_stack_pt]);
+	us_elapsed = INSTR_TIME_GET_MICROSEC(now);
+	us_self = us_elapsed - graph_stack_child_time[graph_stack_pt];
+
+	if (graph_stack_pt > 0)
+		graph_stack_child_time[graph_stack_pt - 1] += us_elapsed;
+
+	callGraph_collect(us_elapsed, us_self, graph_stack_child_time[graph_stack_pt]);
+
+	graph_stack.stack[graph_stack_pt] = InvalidOid;
 }
 
 /* -------------------------------------------------------------------
@@ -416,6 +507,23 @@ findSource(Oid oid, HeapTuple *tup, char **funcName)
 }
 
 /* -------------------------------------------------------------------
+ * findFuncname()
+ *
+ * 	Return the name of a function by Oid.
+ * -------------------------------------------------------------------
+ */
+static char *
+findFuncname(Oid oid, HeapTuple *tup)
+{
+	*tup = SearchSysCache(PROCOID, ObjectIdGetDatum(oid), 0, 0, 0);
+
+	if(!HeapTupleIsValid(*tup))
+		return "<unknown>";
+
+	return NameStr(((Form_pg_proc)GETSTRUCT(*tup))->proname);
+}
+
+/* -------------------------------------------------------------------
  * copyLine()
  *
  *	This function creates a null-terminated copy of the given string
@@ -480,16 +588,25 @@ InitHashTable(void)
 {
 	HASHCTL		hash_ctl;
 
+	/* Create the memory context for our data */
 	profiler_mcxt = AllocSetContextCreate(TopMemoryContext,
 										  "PL/pgSQL profiler",
 										  ALLOCSET_DEFAULT_MINSIZE,
 										  ALLOCSET_DEFAULT_INITSIZE,
 										  ALLOCSET_DEFAULT_MAXSIZE);
+
+	temp_mcxt = AllocSetContextCreate(profiler_mcxt,
+										  "PL/pgSQL profiler temp",
+										  ALLOCSET_DEFAULT_MINSIZE,
+										  ALLOCSET_DEFAULT_INITSIZE,
+										  ALLOCSET_DEFAULT_MAXSIZE);
+
+	/* Create the hash table for line stats */
 	MemSet(&hash_ctl, 0, sizeof(hash_ctl));
 
 	hash_ctl.keysize = sizeof(lineHashKey);
 	hash_ctl.entrysize = sizeof(lineEntry);
-	hash_ctl.hash = line_stats_fn;
+	hash_ctl.hash = line_hash_fn;
 	hash_ctl.match = line_match_fn;
 	hash_ctl.hcxt = profiler_mcxt;
 
@@ -497,10 +614,24 @@ InitHashTable(void)
 				 plprofiler_max,
 				 &hash_ctl,
 				 HASH_ELEM | HASH_FUNCTION | HASH_COMPARE);
+
+	/* Create the hash table for call stats */
+	MemSet(&hash_ctl, 0, sizeof(hash_ctl));
+
+	hash_ctl.keysize = sizeof(callGraphKey);
+	hash_ctl.entrysize = sizeof(callGraphEntry);
+	hash_ctl.hash = callGraph_hash_fn;
+	hash_ctl.match = callGraph_match_fn;
+	hash_ctl.hcxt = profiler_mcxt;
+
+	callGraph_stats = hash_create("Function Call Graphs",
+				 PL_MAX_STACK_DEPTH * PL_MAX_STACK_DEPTH * plprofiler_max / 50,
+				 &hash_ctl,
+				 HASH_ELEM | HASH_FUNCTION | HASH_COMPARE);
 }
 
 static uint32
-line_stats_fn(const void *key, Size keysize)
+line_hash_fn(const void *key, Size keysize)
 {
 	const lineHashKey *k = (const lineHashKey *) key;
 
@@ -519,6 +650,51 @@ line_match_fn(const void *key1, const void *key2, Size keysize)
 		return 0;
 	else
 		return 1;
+}
+
+static uint32
+callGraph_hash_fn(const void *key, Size keysize)
+{
+	return hash_any(key, keysize);
+}
+
+static int
+callGraph_match_fn(const void *key1, const void *key2, Size keysize)
+{
+	callGraphKey   *stack1 = (callGraphKey *)key1;
+	callGraphKey   *stack2 = (callGraphKey *)key2;
+	int				i;
+
+	for (i = 0; i < PL_MAX_STACK_DEPTH && stack1->stack[i] != InvalidOid; i++)
+		if (stack1->stack[i] != stack2->stack[i])
+			return 1;
+	return 0;
+}
+
+static void
+callGraph_collect(uint64 us_elapsed, uint64 us_self, uint64 us_children)
+{
+	callGraphEntry *entry;
+	bool			found;
+
+	entry = (callGraphEntry *)hash_search(callGraph_stats, &graph_stack,
+										  HASH_ENTER, &found);
+
+	if (!found)
+	{
+		memcpy(&(entry->key), &graph_stack, sizeof(entry->key));
+		entry->callCount = 1;
+		entry->totalTime = us_elapsed;
+		entry->childTime = us_children;
+		entry->selfTime = us_self;
+	}
+	else
+	{
+		entry->callCount++;
+		entry->totalTime = entry->totalTime + us_elapsed;
+		entry->childTime = entry->childTime + us_children;
+		entry->selfTime  = entry->selfTime + us_self;
+	}
 }
 
 static lineEntry *
@@ -625,6 +801,101 @@ pl_profiler(PG_FUNCTION_ARGS)
 }
 
 Datum
+pl_callgraph(PG_FUNCTION_ARGS)
+{
+	ReturnSetInfo	   *rsinfo = (ReturnSetInfo *)fcinfo->resultinfo;
+	TupleDesc			tupdesc;
+	Tuplestorestate	   *tupstore;
+	MemoryContext		per_query_ctx;
+	MemoryContext		oldcontext;
+	HASH_SEQ_STATUS		hash_seq;
+	callGraphEntry	   *entry;
+
+	if (!callGraph_stats)
+		ereport(ERROR,
+				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+				 errmsg("plprofiler must be loaded and enabled")));
+
+	/* check to see if caller supports us returning a tuplestore */
+	if (rsinfo == NULL || !IsA(rsinfo, ReturnSetInfo))
+		ereport(ERROR,
+				(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+				 errmsg("set-valued function called in context "
+						"that cannot accept a set")));
+	if (!(rsinfo->allowedModes & SFRM_Materialize))
+		ereport(ERROR,
+				(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+				 errmsg("materialize mode required, but it is not "
+						"allowed in this context")));
+
+	/* Build a tuple descriptor for our result type */
+	if (get_call_result_type(fcinfo, NULL, &tupdesc) != TYPEFUNC_COMPOSITE)
+		elog(ERROR, "return type must be a row type");
+
+	per_query_ctx = rsinfo->econtext->ecxt_per_query_memory;
+	oldcontext = MemoryContextSwitchTo(per_query_ctx);
+
+	tupstore = tuplestore_begin_heap(true, false, work_mem);
+	rsinfo->returnMode = SFRM_Materialize;
+	rsinfo->setResult = tupstore;
+	rsinfo->setDesc = tupdesc;
+
+	MemoryContextSwitchTo(oldcontext);
+
+	hash_seq_init(&hash_seq, callGraph_stats);
+	while ((entry = hash_seq_search(&hash_seq)) != NULL)
+	{
+		Datum		values[PL_CALLGRAPH_COLS];
+		bool		nulls[PL_CALLGRAPH_COLS];
+		Datum		funcnames[PL_MAX_STACK_DEPTH];
+		char		funcname_buf[NAMEDATALEN + 16];
+		int			i = 0;
+		int			j = 0;
+
+		memset(values, 0, sizeof(values));
+		memset(nulls, 0, sizeof(nulls));
+
+		/*
+		 * Switch to the temporary memory context and assemble the
+		 * text array showing the callstack as { 'funcname:oid' [, ...] }
+		 */
+		oldcontext = MemoryContextSwitchTo(temp_mcxt);
+		for (i = 0; i < PL_MAX_STACK_DEPTH && entry->key.stack[i] != InvalidOid; i++)
+		{
+			HeapTuple	procTup;
+			snprintf(funcname_buf, sizeof(funcname_buf),
+					 "%s:%d", findFuncname(entry->key.stack[i], &procTup),
+					 (int)(entry->key.stack[i]));
+			if (HeapTupleIsValid(procTup))
+				ReleaseSysCache(procTup);
+
+			funcnames[i] = PointerGetDatum(cstring_to_text(funcname_buf));
+		}
+
+		values[j++] = PointerGetDatum(construct_array(funcnames, i,
+													  TEXTOID, -1,
+													  false, 'i'));
+
+		values[j++] = Int64GetDatumFast(entry->callCount);
+		values[j++] = Int64GetDatumFast(entry->totalTime);
+		values[j++] = Int64GetDatumFast(entry->childTime);
+		values[j++] = Int64GetDatumFast(entry->selfTime);
+
+		Assert(j == PL_CALLGRAPH_COLS);
+
+		tuplestore_putvalues(tupstore, tupdesc, values, nulls);
+
+		MemoryContextSwitchTo(oldcontext);
+		MemoryContextReset(temp_mcxt);
+	}
+
+	/* clean up and return the tuplestore */
+	tuplestore_donestoring(tupstore);
+
+	return (Datum)0;
+}
+
+Datum
 pl_profiler_reset(PG_FUNCTION_ARGS)
 {
 	if (!line_stats || !profiler_mcxt)
@@ -632,9 +903,12 @@ pl_profiler_reset(PG_FUNCTION_ARGS)
 				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
 				 errmsg("pl_profiler must be loaded")));
 
+	MemoryContextDelete(temp_mcxt);
+	temp_mcxt = NULL;
 	MemoryContextDelete(profiler_mcxt);
 	profiler_mcxt = NULL;
 	line_stats = NULL;
+	callGraph_stats = NULL;
 
 	PG_RETURN_VOID();
 }
@@ -652,4 +926,3 @@ pl_profiler_enable(PG_FUNCTION_ARGS)
 
 	PG_RETURN_BOOL(enabled);
 }
-
