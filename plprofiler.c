@@ -157,6 +157,7 @@ static int callGraph_match_fn(const void *key1, const void *key2, Size keysize);
 static lineEntry *entry_alloc(lineHashKey *key, const char *line);
 static void callGraph_collect(uint64 us_elapsed, uint64 us_self,
 							  uint64 us_children);
+static void profiler_enabled_assign(bool newval, void *extra);
 
 /**********************************************************************
  * Exported Function definitions
@@ -177,8 +178,11 @@ _PG_init(void)
 							NULL,
 							&profiler_enabled,
 							false,
-							PGC_USERSET, 0,
-							NULL, NULL, NULL);
+							PGC_USERSET,
+							0,
+							NULL,
+							profiler_enabled_assign,
+							NULL);
 
 	DefineCustomIntVariable("plprofiler.max_lines",
 							"Sets the maximum number of procedural "
@@ -748,11 +752,6 @@ pl_profiler(PG_FUNCTION_ARGS)
 	HASH_SEQ_STATUS		hash_seq;
 	lineEntry		   *entry;
 
-	if (!line_stats)
-		ereport(ERROR,
-				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
-				 errmsg("plprofiler must be loaded and enabled")));
-
 	/* check to see if caller supports us returning a tuplestore */
 	if (rsinfo == NULL || !IsA(rsinfo, ReturnSetInfo))
 		ereport(ERROR,
@@ -779,28 +778,31 @@ pl_profiler(PG_FUNCTION_ARGS)
 
 	MemoryContextSwitchTo(oldcontext);
 
-	hash_seq_init(&hash_seq, line_stats);
-	while ((entry = hash_seq_search(&hash_seq)) != NULL)
+	if (line_stats != NULL)
 	{
-		Datum		values[PL_PROFILE_COLS];
-		bool		nulls[PL_PROFILE_COLS];
-		int			i = 0;
+		hash_seq_init(&hash_seq, line_stats);
+		while ((entry = hash_seq_search(&hash_seq)) != NULL)
+		{
+			Datum		values[PL_PROFILE_COLS];
+			bool		nulls[PL_PROFILE_COLS];
+			int			i = 0;
 
-		memset(values, 0, sizeof(values));
-		memset(nulls, 0, sizeof(nulls));
+			memset(values, 0, sizeof(values));
+			memset(nulls, 0, sizeof(nulls));
 
-		values[i++] = ObjectIdGetDatum(entry->key.func_oid);
-		values[i++] = Int64GetDatumFast(entry->key.line_number);
+			values[i++] = ObjectIdGetDatum(entry->key.func_oid);
+			values[i++] = Int64GetDatumFast(entry->key.line_number);
 
-		values[i++] = CStringGetTextDatum(entry->line);
+			values[i++] = CStringGetTextDatum(entry->line);
 
-		values[i++] = Int64GetDatumFast(entry->counters.exec_count);
-		values[i++] = Int64GetDatumFast(entry->counters.total_time);
-		values[i++] = Int64GetDatumFast(entry->counters.time_longest);
+			values[i++] = Int64GetDatumFast(entry->counters.exec_count);
+			values[i++] = Int64GetDatumFast(entry->counters.total_time);
+			values[i++] = Int64GetDatumFast(entry->counters.time_longest);
 
-		Assert(i == PL_PROFILE_COLS);
+			Assert(i == PL_PROFILE_COLS);
 
-		tuplestore_putvalues(tupstore, tupdesc, values, nulls);
+			tuplestore_putvalues(tupstore, tupdesc, values, nulls);
+		}
 	}
 
 	/* clean up and return the tuplestore */
@@ -820,11 +822,6 @@ pl_callgraph(PG_FUNCTION_ARGS)
 	HASH_SEQ_STATUS		hash_seq;
 	callGraphEntry	   *entry;
 
-	if (!callGraph_stats)
-		ereport(ERROR,
-				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
-				 errmsg("plprofiler must be loaded and enabled")));
-
 	/* check to see if caller supports us returning a tuplestore */
 	if (rsinfo == NULL || !IsA(rsinfo, ReturnSetInfo))
 		ereport(ERROR,
@@ -851,51 +848,54 @@ pl_callgraph(PG_FUNCTION_ARGS)
 
 	MemoryContextSwitchTo(oldcontext);
 
-	hash_seq_init(&hash_seq, callGraph_stats);
-	while ((entry = hash_seq_search(&hash_seq)) != NULL)
+	if (callGraph_stats != NULL)
 	{
-		Datum		values[PL_CALLGRAPH_COLS];
-		bool		nulls[PL_CALLGRAPH_COLS];
-		Datum		funcnames[PL_MAX_STACK_DEPTH];
-		char		funcname_buf[NAMEDATALEN + 16];
-		int			i = 0;
-		int			j = 0;
-
-		memset(values, 0, sizeof(values));
-		memset(nulls, 0, sizeof(nulls));
-
-		/*
-		 * Switch to the temporary memory context and assemble the
-		 * text array showing the callstack as { 'funcname:oid' [, ...] }
-		 */
-		oldcontext = MemoryContextSwitchTo(temp_mcxt);
-		for (i = 0; i < PL_MAX_STACK_DEPTH && entry->key.stack[i] != InvalidOid; i++)
+		hash_seq_init(&hash_seq, callGraph_stats);
+		while ((entry = hash_seq_search(&hash_seq)) != NULL)
 		{
-			HeapTuple	procTup;
-			snprintf(funcname_buf, sizeof(funcname_buf),
-					 "%s:%d", findFuncname(entry->key.stack[i], &procTup),
-					 (int)(entry->key.stack[i]));
-			if (HeapTupleIsValid(procTup))
-				ReleaseSysCache(procTup);
+			Datum		values[PL_CALLGRAPH_COLS];
+			bool		nulls[PL_CALLGRAPH_COLS];
+			Datum		funcnames[PL_MAX_STACK_DEPTH];
+			char		funcname_buf[NAMEDATALEN + 16];
+			int			i = 0;
+			int			j = 0;
 
-			funcnames[i] = PointerGetDatum(cstring_to_text(funcname_buf));
+			memset(values, 0, sizeof(values));
+			memset(nulls, 0, sizeof(nulls));
+
+			/*
+			 * Switch to the temporary memory context and assemble the
+			 * text array showing the callstack as { 'funcname:oid' [, ...] }
+			 */
+			oldcontext = MemoryContextSwitchTo(temp_mcxt);
+			for (i = 0; i < PL_MAX_STACK_DEPTH && entry->key.stack[i] != InvalidOid; i++)
+			{
+				HeapTuple	procTup;
+				snprintf(funcname_buf, sizeof(funcname_buf),
+						 "%s:%d", findFuncname(entry->key.stack[i], &procTup),
+						 (int)(entry->key.stack[i]));
+				if (HeapTupleIsValid(procTup))
+					ReleaseSysCache(procTup);
+
+				funcnames[i] = PointerGetDatum(cstring_to_text(funcname_buf));
+			}
+
+			values[j++] = PointerGetDatum(construct_array(funcnames, i,
+														  TEXTOID, -1,
+														  false, 'i'));
+
+			values[j++] = Int64GetDatumFast(entry->callCount);
+			values[j++] = Int64GetDatumFast(entry->totalTime);
+			values[j++] = Int64GetDatumFast(entry->childTime);
+			values[j++] = Int64GetDatumFast(entry->selfTime);
+
+			Assert(j == PL_CALLGRAPH_COLS);
+
+			tuplestore_putvalues(tupstore, tupdesc, values, nulls);
+
+			MemoryContextSwitchTo(oldcontext);
+			MemoryContextReset(temp_mcxt);
 		}
-
-		values[j++] = PointerGetDatum(construct_array(funcnames, i,
-													  TEXTOID, -1,
-													  false, 'i'));
-
-		values[j++] = Int64GetDatumFast(entry->callCount);
-		values[j++] = Int64GetDatumFast(entry->totalTime);
-		values[j++] = Int64GetDatumFast(entry->childTime);
-		values[j++] = Int64GetDatumFast(entry->selfTime);
-
-		Assert(j == PL_CALLGRAPH_COLS);
-
-		tuplestore_putvalues(tupstore, tupdesc, values, nulls);
-
-		MemoryContextSwitchTo(oldcontext);
-		MemoryContextReset(temp_mcxt);
 	}
 
 	/* clean up and return the tuplestore */
@@ -934,4 +934,12 @@ pl_profiler_enable(PG_FUNCTION_ARGS)
 		InitHashTable();
 
 	PG_RETURN_BOOL(profiler_enabled);
+}
+
+static void
+profiler_enabled_assign(bool newval, void *extra)
+{
+	profiler_enabled = newval;
+	if (newval && !line_stats)
+		InitHashTable();
 }
