@@ -5,7 +5,6 @@
 CREATE FUNCTION pl_profiler(
     OUT func_oid oid,
     OUT line_number int8,
-    OUT line text,
     OUT exec_count int8,
     OUT total_time int8,
     OUT longest_time int8
@@ -25,6 +24,11 @@ RETURNS SETOF record
 AS 'MODULE_PATHNAME'
 LANGUAGE C;
 
+CREATE FUNCTION pl_profiler_get_source(oid, int8)
+RETURNS text
+AS 'MODULE_PATHNAME'
+LANGUAGE C;
+
 CREATE FUNCTION pl_profiler_reset()
 RETURNS void
 AS 'MODULE_PATHNAME'
@@ -36,7 +40,9 @@ AS 'MODULE_PATHNAME'
 LANGUAGE C;
 
 CREATE VIEW pl_profiler AS
-  SELECT * 
+  SELECT func_oid, line_number,
+		pl_profiler_get_source(func_oid, line_number) as line,
+		exec_count, total_time, longest_time
     FROM pl_profiler()
    ORDER BY func_oid, line_number;
 
