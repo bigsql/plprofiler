@@ -42,7 +42,8 @@ LANGUAGE C;
 CREATE FUNCTION pl_profiler_save_stats()
 RETURNS void
 AS 'MODULE_PATHNAME'
-LANGUAGE C;
+LANGUAGE C
+SECURITY DEFINER;
 
 CREATE TABLE pl_profiler_line_data (
 	func_oid		oid,
@@ -93,9 +94,9 @@ CREATE VIEW pl_callgraph AS
 
 GRANT SELECT ON pl_profiler TO PUBLIC;
 GRANT SELECT ON pl_callgraph TO PUBLIC;
-GRANT SELECT ON pl_profiler_line_data TO PUBLIC;
+GRANT INSERT, SELECT ON pl_profiler_line_data TO PUBLIC;
 GRANT SELECT ON pl_profiler_line_stats TO PUBLIC;
-GRANT SELECT ON pl_profiler_callgraph_data TO PUBLIC;
+GRANT INSERT, SELECT ON pl_profiler_callgraph_data TO PUBLIC;
 GRANT SELECT ON pl_profiler_callgraph_stats TO PUBLIC;
 GRANT EXECUTE ON FUNCTION pl_profiler_get_source(oid, int8) TO PUBLIC;
 GRANT EXECUTE ON FUNCTION pl_profiler_reset() TO PUBLIC;
