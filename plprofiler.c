@@ -1041,7 +1041,8 @@ pl_profiler_callgraph(PG_FUNCTION_ARGS)
 				}
 
 				snprintf(funcdef_buf, sizeof(funcdef_buf),
-						 "%s(%s)", funcname, funcargs_s);
+						 "%s(%s) oid=%d", funcname, funcargs_s,
+						 entry->key.stack[i]);
 
 				funcdefs[i] = PointerGetDatum(cstring_to_text(funcdef_buf));
 			}
