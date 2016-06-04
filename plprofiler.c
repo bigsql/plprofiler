@@ -122,8 +122,6 @@ static int				graph_stack_pt = 0;
 static TransactionId	graph_current_xid = InvalidTransactionId;
 static time_t			last_save_time = 0;
 
-static int			plprofiler_max;			/* max # lines to track */
-
 PLpgSQL_plugin	  **plugin_ptr = NULL;
 
 Datum pl_profiler_get_source(PG_FUNCTION_ARGS);
@@ -231,20 +229,6 @@ _PG_init(void)
 							NULL,
 							&profiler_save_callgraph_table,
 							NULL,
-							PGC_USERSET,
-							0,
-							NULL,
-							NULL,
-							NULL);
-
-	DefineCustomIntVariable("plprofiler.max_lines",
-							"Sets the maximum number of procedural "
-							"lines of code tracked by plprofiler.",
-							NULL,
-							&plprofiler_max,
-							10000,
-							1000,
-							INT_MAX,
 							PGC_USERSET,
 							0,
 							NULL,
@@ -676,7 +660,7 @@ InitHashTable(void)
 	hash_ctl.hcxt = profiler_mcxt;
 
 	line_stats = hash_create("Function Lines",
-				 plprofiler_max,
+				 10000,
 				 &hash_ctl,
 				 HASH_ELEM | HASH_FUNCTION | HASH_COMPARE);
 
@@ -690,7 +674,7 @@ InitHashTable(void)
 	hash_ctl.hcxt = profiler_mcxt;
 
 	callGraph_stats = hash_create("Function Call Graphs",
-				 PL_MAX_STACK_DEPTH * PL_MAX_STACK_DEPTH * plprofiler_max / 50,
+				 1000,
 				 &hash_ctl,
 				 HASH_ELEM | HASH_FUNCTION | HASH_COMPARE);
 }
@@ -768,17 +752,12 @@ entry_alloc(lineHashKey *key, int64 line_offset, int64 line_len)
 	lineEntry	   *entry;
 	bool			found;
 
-	if (hash_get_num_entries(line_stats) >= plprofiler_max)
-		return NULL;
-
 	/* Find or create an entry with desired hash code */
 	entry = (lineEntry *)hash_search(line_stats, key, HASH_ENTER, &found);
 
 	if (!found)
 	{
 		/* New entry, initialize it */
-
-		/* reset the statistics */
 		memset(&entry->counters, 0, sizeof(Counters));
 		entry->line_offset = line_offset;
 		entry->line_len = line_len;
