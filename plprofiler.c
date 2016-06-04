@@ -122,18 +122,18 @@ static int				graph_stack_pt = 0;
 static TransactionId	graph_current_xid = InvalidTransactionId;
 static time_t			last_save_time = 0;
 
-PLpgSQL_plugin	  **plugin_ptr = NULL;
+PLpgSQL_plugin		  **plugin_ptr = NULL;
 
 Datum pl_profiler_get_source(PG_FUNCTION_ARGS);
-Datum pl_profiler(PG_FUNCTION_ARGS);
-Datum pl_callgraph(PG_FUNCTION_ARGS);
+Datum pl_profiler_linestats(PG_FUNCTION_ARGS);
+Datum pl_profiler_callgraph(PG_FUNCTION_ARGS);
 Datum pl_profiler_reset(PG_FUNCTION_ARGS);
 Datum pl_profiler_enable(PG_FUNCTION_ARGS);
 Datum pl_profiler_save_stats(PG_FUNCTION_ARGS);
 
 PG_FUNCTION_INFO_V1(pl_profiler_get_source);
-PG_FUNCTION_INFO_V1(pl_profiler);
-PG_FUNCTION_INFO_V1(pl_callgraph);
+PG_FUNCTION_INFO_V1(pl_profiler_linestats);
+PG_FUNCTION_INFO_V1(pl_profiler_callgraph);
 PG_FUNCTION_INFO_V1(pl_profiler_reset);
 PG_FUNCTION_INFO_V1(pl_profiler_enable);
 PG_FUNCTION_INFO_V1(pl_profiler_save_stats);
@@ -209,7 +209,7 @@ _PG_init(void)
 							NULL,
 							NULL);
 
-	DefineCustomStringVariable("plprofiler.save_line_table",
+	DefineCustomStringVariable("plprofiler.save_linestats_table",
 							"The table in which the pl_profiler_save_stats() "
 							"function (and the interval saving) will insert "
 							"per source line stats into",
@@ -766,6 +766,32 @@ entry_alloc(lineHashKey *key, int64 line_offset, int64 line_len)
 	return entry;
 }
 
+static void
+profiler_enabled_assign(bool newval, void *extra)
+{
+	profiler_enabled = newval;
+	if (newval && !line_stats)
+		InitHashTable();
+}
+
+static void
+profiler_save_stats(void)
+{
+	SPI_push();
+	DirectFunctionCall1(pl_profiler_save_stats, (Datum)0);
+	SPI_pop();
+}
+
+/**********************************************************************
+ * SQL callable functions
+ **********************************************************************/
+
+/* -------------------------------------------------------------------
+ * pl_profiler_get_source(func oid, lineno int8)
+ *
+ *	Returns one line of PL source code.
+ * -------------------------------------------------------------------
+ */
 Datum
 pl_profiler_get_source(PG_FUNCTION_ARGS)
 {
@@ -834,6 +860,7 @@ pl_profiler_get_source(PG_FUNCTION_ARGS)
 		}
 	}
 
+	/* Make sure that the function source text is long enough. */
 	if (entry->line_offset > strlen(procSrc))
 	{
 		ReleaseSysCache(procTuple);
@@ -853,8 +880,15 @@ pl_profiler_get_source(PG_FUNCTION_ARGS)
 	PG_RETURN_TEXT_P(result);
 }
 
+/* -------------------------------------------------------------------
+ * pl_profiler_linestats()
+ *
+ *	Returns the current content of the line stats hash table
+ *	as a set of rows.
+ * -------------------------------------------------------------------
+ */
 Datum
-pl_profiler(PG_FUNCTION_ARGS)
+pl_profiler_linestats(PG_FUNCTION_ARGS)
 {
 	ReturnSetInfo	   *rsinfo = (ReturnSetInfo *)fcinfo->resultinfo;
 	TupleDesc			tupdesc;
@@ -920,8 +954,15 @@ pl_profiler(PG_FUNCTION_ARGS)
 	return (Datum)0;
 }
 
+/* -------------------------------------------------------------------
+ * pl_profiler_callgraph()
+ *
+ *	Returns the current content of the call graph hash table
+ *	as a set of rows.
+ * -------------------------------------------------------------------
+ */
 Datum
-pl_callgraph(PG_FUNCTION_ARGS)
+pl_profiler_callgraph(PG_FUNCTION_ARGS)
 {
 	ReturnSetInfo	   *rsinfo = (ReturnSetInfo *)fcinfo->resultinfo;
 	TupleDesc			tupdesc;
@@ -978,7 +1019,7 @@ pl_callgraph(PG_FUNCTION_ARGS)
 
 			/*
 			 * Switch to the temporary memory context and assemble the
-			 * text array showing the callstack as { 'funcname:oid' [, ...] }
+			 * text array showing the callstack as { 'funcname(args)' [, ...] }
 			 */
 			oldcontext = MemoryContextSwitchTo(temp_mcxt);
 			for (i = 0; i < PL_MAX_STACK_DEPTH && entry->key.stack[i] != InvalidOid; i++)
@@ -1031,6 +1072,12 @@ pl_callgraph(PG_FUNCTION_ARGS)
 	return (Datum)0;
 }
 
+/* -------------------------------------------------------------------
+ * pl_profiler_reset()
+ *
+ *	Drop all current data collected in the hash tables.
+ * -------------------------------------------------------------------
+ */
 Datum
 pl_profiler_reset(PG_FUNCTION_ARGS)
 {
@@ -1049,6 +1096,12 @@ pl_profiler_reset(PG_FUNCTION_ARGS)
 	PG_RETURN_VOID();
 }
 
+/* -------------------------------------------------------------------
+ * pl_profiler_enable()
+ *
+ *	Turn profiling on or off.
+ * -------------------------------------------------------------------
+ */
 Datum
 pl_profiler_enable(PG_FUNCTION_ARGS)
 {
@@ -1063,14 +1116,13 @@ pl_profiler_enable(PG_FUNCTION_ARGS)
 	PG_RETURN_BOOL(profiler_enabled);
 }
 
-static void
-profiler_enabled_assign(bool newval, void *extra)
-{
-	profiler_enabled = newval;
-	if (newval && !line_stats)
-		InitHashTable();
-}
-
+/* -------------------------------------------------------------------
+ * pl_profiler_save_stats()
+ *
+ *	Save the current content of the hash tables into the configured
+ *	permanent tables and reset the counters.
+ * -------------------------------------------------------------------
+ */
 Datum
 pl_profiler_save_stats(PG_FUNCTION_ARGS)
 {
@@ -1094,7 +1146,7 @@ pl_profiler_save_stats(PG_FUNCTION_ARGS)
 				 "INSERT INTO %s "
 				 "    SELECT func_oid, line_number, exec_count, total_time, "
 				 "			 longest_time "
-				 "    FROM pl_profiler()",
+				 "    FROM pl_profiler_linestats()",
 				 profiler_save_line_table);
 		SPI_exec(query, 0);
 
@@ -1102,8 +1154,6 @@ pl_profiler_save_stats(PG_FUNCTION_ARGS)
 		while ((lineEnt = hash_seq_search(&hash_seq)) != NULL)
 			memset(&(lineEnt->counters), 0, sizeof(Counters));
 	}
-	else
-		elog(NOTICE, "no line_stats or profiler_save_line_table");
 
 	/* Same with call graph stats. */
 	if (callGraph_stats != NULL && profiler_save_callgraph_table != NULL)
@@ -1112,7 +1162,7 @@ pl_profiler_save_stats(PG_FUNCTION_ARGS)
 				 "INSERT INTO %s "
 				 "    SELECT stack, call_count, us_total, "
 				 "           us_children, us_self "
-				 "    FROM pl_callgraph()",
+				 "    FROM pl_profiler_callgraph()",
 				 profiler_save_callgraph_table);
 		SPI_exec(query, 0);
 
@@ -1131,11 +1181,3 @@ pl_profiler_save_stats(PG_FUNCTION_ARGS)
 	PG_RETURN_VOID();
 }
 
-
-static void
-profiler_save_stats(void)
-{
-	SPI_push();
-	DirectFunctionCall1(pl_profiler_save_stats, (Datum)0);
-	SPI_pop();
-}
