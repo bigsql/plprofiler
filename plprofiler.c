@@ -14,6 +14,7 @@
 #include "postgres.h"
 
 #include <stdio.h>
+#include <time.h>
 #include <sys/time.h>
 #include "access/hash.h"
 #include "access/htup.h"
@@ -109,6 +110,9 @@ static MemoryContext	temp_mcxt = NULL;
 static HTAB			   *line_stats = NULL;
 
 static bool				profiler_enabled = false;
+static int				profiler_save_interval = -1;
+static char			   *profiler_save_line_table = NULL;
+static char			   *profiler_save_callgraph_table = NULL;
 
 static HTAB			   *callGraph_stats = NULL;
 static callGraphKey		graph_stack;
@@ -116,6 +120,7 @@ static instr_time		graph_stack_entry[PL_MAX_STACK_DEPTH];
 static uint64			graph_stack_child_time[PL_MAX_STACK_DEPTH];
 static int				graph_stack_pt = 0;
 static TransactionId	graph_current_xid = InvalidTransactionId;
+static time_t			last_save_time = 0;
 
 static int			plprofiler_max;			/* max # lines to track */
 
@@ -126,12 +131,14 @@ Datum pl_profiler(PG_FUNCTION_ARGS);
 Datum pl_callgraph(PG_FUNCTION_ARGS);
 Datum pl_profiler_reset(PG_FUNCTION_ARGS);
 Datum pl_profiler_enable(PG_FUNCTION_ARGS);
+Datum pl_profiler_save_stats(PG_FUNCTION_ARGS);
 
 PG_FUNCTION_INFO_V1(pl_profiler_get_source);
 PG_FUNCTION_INFO_V1(pl_profiler);
 PG_FUNCTION_INFO_V1(pl_callgraph);
 PG_FUNCTION_INFO_V1(pl_profiler_reset);
 PG_FUNCTION_INFO_V1(pl_profiler_enable);
+PG_FUNCTION_INFO_V1(pl_profiler_save_stats);
 
 /**********************************************************************
  * Exported function prototypes
@@ -152,7 +159,6 @@ static void profiler_stmt_beg(PLpgSQL_execstate *estate, PLpgSQL_stmt *stmt);
 static void profiler_stmt_end(PLpgSQL_execstate *estate, PLpgSQL_stmt *stmt);
 
 static char *findSource(Oid oid, HeapTuple *tup, char **funcName);
-// static char *copyLine(const char * src, size_t len);
 static int scanSource(const char *src, int64 *line_offset, int64 *line_len);
 static void InitHashTable(void);
 static uint32 line_hash_fn(const void *key, Size keysize);
@@ -164,6 +170,7 @@ static lineEntry *entry_alloc(lineHashKey *key, int64 line_offset,
 static void callGraph_collect(uint64 us_elapsed, uint64 us_self,
 							  uint64 us_children);
 static void profiler_enabled_assign(bool newval, void *extra);
+static void profiler_save_stats(void);
 
 /**********************************************************************
  * Exported Function definitions
@@ -188,6 +195,46 @@ _PG_init(void)
 							0,
 							NULL,
 							profiler_enabled_assign,
+							NULL);
+
+	DefineCustomIntVariable("plprofiler.save_interval",
+							"Interval in seconds for saving profiler stats "
+							"in the permanent tables.",
+							NULL,
+							&profiler_save_interval,
+							0,
+							0,
+							3600,
+							PGC_USERSET,
+							0,
+							NULL,
+							NULL,
+							NULL);
+
+	DefineCustomStringVariable("plprofiler.save_line_table",
+							"The table in which the pl_profiler_save_stats() "
+							"function (and the interval saving) will insert "
+							"per source line stats into",
+							NULL,
+							&profiler_save_line_table,
+							NULL,
+							PGC_USERSET,
+							0,
+							NULL,
+							NULL,
+							NULL);
+
+	DefineCustomStringVariable("plprofiler.save_callgraph_table",
+							"The table in which the pl_profiler_save_stats() "
+							"function (and the interval saving) will insert "
+							"call graph stats into",
+							NULL,
+							&profiler_save_callgraph_table,
+							NULL,
+							PGC_USERSET,
+							0,
+							NULL,
+							NULL,
 							NULL);
 
 	DefineCustomIntVariable("plprofiler.max_lines",
@@ -418,6 +465,21 @@ profiler_func_end(PLpgSQL_execstate *estate, PLpgSQL_function *func)
 	callGraph_collect(us_elapsed, us_self, graph_stack_child_time[graph_stack_pt]);
 
 	graph_stack.stack[graph_stack_pt] = InvalidOid;
+
+	/*
+	 * Finally if a plprofiler.save_interval is configured, save and reset
+	 * the stats if the interval has elapsed.
+	 */
+	if (profiler_save_interval > 0)
+	{
+		time_t	now = time(NULL);
+
+		if (now >= last_save_time + profiler_save_interval)
+		{
+		    profiler_save_stats();
+			last_save_time = now;
+		}
+	}
 }
 
 /* -------------------------------------------------------------------
@@ -545,26 +607,6 @@ findFuncname(Oid oid, HeapTuple *tup)
 
 	return NameStr(((Form_pg_proc)GETSTRUCT(*tup))->proname);
 }
-
-/* -------------------------------------------------------------------
- * copyLine()
- *
- *	This function creates a null-terminated copy of the given string
- *	(presumably a line of source code).
- * -------------------------------------------------------------------
- */
-/*
-static char *
-copyLine(const char *src, size_t len)
-{
-	char   *result = palloc(len+1);
-
-	memcpy(result, src, len);
-	result[len] = '\0';
-
-	return result;
-}
-*/
 
 /* -------------------------------------------------------------------
  * scanSource()
@@ -935,6 +977,7 @@ pl_callgraph(PG_FUNCTION_ARGS)
 	rsinfo->setDesc = tupdesc;
 
 	MemoryContextSwitchTo(oldcontext);
+	SPI_connect();
 
 	if (callGraph_stats != NULL)
 	{
@@ -943,8 +986,11 @@ pl_callgraph(PG_FUNCTION_ARGS)
 		{
 			Datum		values[PL_CALLGRAPH_COLS];
 			bool		nulls[PL_CALLGRAPH_COLS];
-			Datum		funcnames[PL_MAX_STACK_DEPTH];
-			char		funcname_buf[NAMEDATALEN + 16];
+			Datum		funcdefs[PL_MAX_STACK_DEPTH];
+			char		funcdef_buf[8192];
+			Datum		funcargs;
+			char	   *funcargs_s;
+
 			int			i = 0;
 			int			j = 0;
 
@@ -959,16 +1005,28 @@ pl_callgraph(PG_FUNCTION_ARGS)
 			for (i = 0; i < PL_MAX_STACK_DEPTH && entry->key.stack[i] != InvalidOid; i++)
 			{
 				HeapTuple	procTup;
-				snprintf(funcname_buf, sizeof(funcname_buf),
-						 "%s:%d", findFuncname(entry->key.stack[i], &procTup),
-						 (int)(entry->key.stack[i]));
-				if (HeapTupleIsValid(procTup))
-					ReleaseSysCache(procTup);
+				char	   *funcname;
 
-				funcnames[i] = PointerGetDatum(cstring_to_text(funcname_buf));
+				funcname = findFuncname(entry->key.stack[i], &procTup);
+				if (HeapTupleIsValid(procTup))
+				{
+					funcargs = DirectFunctionCall1(pg_get_function_arguments,
+												   ObjectIdGetDatum(entry->key.stack[i]));
+					funcargs_s = DatumGetPointer(DirectFunctionCall1(textout, funcargs));
+					ReleaseSysCache(procTup);
+				}
+				else
+				{
+					funcargs_s = "<unknown>";
+				}
+
+				snprintf(funcdef_buf, sizeof(funcdef_buf),
+						 "%s(%s)", funcname, funcargs_s);
+
+				funcdefs[i] = PointerGetDatum(cstring_to_text(funcdef_buf));
 			}
 
-			values[j++] = PointerGetDatum(construct_array(funcnames, i,
+			values[j++] = PointerGetDatum(construct_array(funcdefs, i,
 														  TEXTOID, -1,
 														  false, 'i'));
 
@@ -988,6 +1046,8 @@ pl_callgraph(PG_FUNCTION_ARGS)
 
 	/* clean up and return the tuplestore */
 	tuplestore_donestoring(tupstore);
+
+	SPI_finish();
 
 	return (Datum)0;
 }
@@ -1030,4 +1090,73 @@ profiler_enabled_assign(bool newval, void *extra)
 	profiler_enabled = newval;
 	if (newval && !line_stats)
 		InitHashTable();
+}
+
+Datum
+pl_profiler_save_stats(PG_FUNCTION_ARGS)
+{
+	HASH_SEQ_STATUS		hash_seq;
+	lineEntry		   *lineEnt;
+	callGraphEntry	   *callGraphEnt;
+	char				query[256];
+
+	if (SPI_connect() != SPI_OK_CONNECT)
+		elog(ERROR, "SPI_connect() failed in pl_profiler_save_stats()");
+
+	/*
+	 * If we have the hash table for line stats and the table name
+	 * to save them into is configured, do that and reset all counters
+	 * (but don't just zap the hash table as rebuilding that is rather
+	 * costly).
+	 */
+	if (line_stats != NULL && profiler_save_line_table != NULL)
+	{
+		snprintf(query, sizeof(query),
+				 "INSERT INTO %s "
+				 "    SELECT func_oid, line_number, exec_count, total_time, "
+				 "			 longest_time "
+				 "    FROM pl_profiler()",
+				 profiler_save_line_table);
+		SPI_exec(query, 0);
+
+		hash_seq_init(&hash_seq, line_stats);
+		while ((lineEnt = hash_seq_search(&hash_seq)) != NULL)
+			memset(&(lineEnt->counters), 0, sizeof(Counters));
+	}
+	else
+		elog(NOTICE, "no line_stats or profiler_save_line_table");
+
+	/* Same with call graph stats. */
+	if (callGraph_stats != NULL && profiler_save_callgraph_table != NULL)
+	{
+		snprintf(query, sizeof(query),
+				 "INSERT INTO %s "
+				 "    SELECT stack, call_count, us_total, "
+				 "           us_children, us_self "
+				 "    FROM pl_callgraph()",
+				 profiler_save_callgraph_table);
+		SPI_exec(query, 0);
+
+		hash_seq_init(&hash_seq, callGraph_stats);
+		while ((callGraphEnt = hash_seq_search(&hash_seq)) != NULL)
+		{
+			callGraphEnt->callCount = 0;
+			callGraphEnt->totalTime = 0;
+			callGraphEnt->childTime = 0;
+			callGraphEnt->selfTime = 0;
+		}
+	}
+
+	SPI_finish();
+
+	PG_RETURN_VOID();
+}
+
+
+static void
+profiler_save_stats(void)
+{
+	SPI_push();
+	DirectFunctionCall1(pl_profiler_save_stats, (Datum)0);
+	SPI_pop();
 }
