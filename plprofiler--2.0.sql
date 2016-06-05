@@ -116,8 +116,7 @@ GRANT INSERT, DELETE, SELECT ON pl_profiler_saved TO public;
 CREATE TABLE pl_profiler_saved_linestats (
 	l_s_id			integer						NOT NULL
 												REFERENCES pl_profiler_saved
-												ON DELETE CASCADE
-												ON UPDATE CASCADE,
+												ON DELETE CASCADE,
 	l_schema		text						NOT NULL,
 	l_funcname		text						NOT NULL,
 	l_funcargs		text						NOT NULL,
@@ -133,8 +132,7 @@ GRANT INSERT, DELETE, SELECT ON pl_profiler_saved_linestats TO public;
 CREATE TABLE pl_profiler_saved_callgraph (
 	c_s_id			integer						NOT NULL
 												REFERENCES pl_profiler_saved
-												ON DELETE CASCADE
-												ON UPDATE CASCADE,
+												ON DELETE CASCADE,
 	c_stack			text[]						NOT NULL,
 	c_call_count	bigint,
 	c_us_total		bigint,
