@@ -104,3 +104,41 @@ CREATE VIEW pl_profiler_callgraph_current AS
     FROM pl_profiler_callgraph();
 GRANT SELECT ON pl_profiler_callgraph_current TO public;
 
+CREATE TABLE pl_profiler_saved (
+	s_id			serial						PRIMARY KEY,
+    s_name			text						NOT NULL UNIQUE,
+	s_saved			timestamp with time zone	NOT NULL DEFAULT now(),
+	s_desc			text						NOT NULL DEFAULT ''
+);
+GRANT INSERT, DELETE, SELECT ON pl_profiler_saved TO public;
+
+CREATE TABLE pl_profiler_saved_linestats (
+	l_s_id			integer						NOT NULL
+												REFERENCES pl_profiler_saved
+												ON DELETE CASCADE
+												ON UPDATE CASCADE,
+	l_schema		text						NOT NULL,
+	l_funcname		text						NOT NULL,
+	l_funcargs		text						NOT NULL,
+	l_line_number	int4						NOT NULL,
+	l_source		text,
+	l_exec_count	bigint,
+	l_total_time	bigint,
+	l_longest_time	bigint,
+	PRIMARY KEY (l_s_id, l_schema, l_funcname, l_funcargs, l_line_number)
+);
+GRANT INSERT, DELETE, SELECT ON pl_profiler_saved_linestats TO public;
+
+CREATE TABLE pl_profiler_saved_callgraph (
+	c_s_id			integer						NOT NULL
+												REFERENCES pl_profiler_saved
+												ON DELETE CASCADE
+												ON UPDATE CASCADE,
+	c_stack			text[]						NOT NULL,
+	c_call_count	bigint,
+	c_us_total		bigint,
+	c_us_children	bigint,
+	c_us_self		bigint,
+	PRIMARY KEY (c_s_id, c_stack)
+);
+GRANT INSERT, DELETE, SELECT ON pl_profiler_saved_callgraph TO public;
