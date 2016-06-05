@@ -108,6 +108,7 @@ CREATE TABLE pl_profiler_saved (
 	s_id			serial						PRIMARY KEY,
     s_name			text						NOT NULL UNIQUE,
 	s_saved			timestamp with time zone	NOT NULL DEFAULT now(),
+	s_title			text						NOT NULL DEFAULT '',
 	s_desc			text						NOT NULL DEFAULT ''
 );
 GRANT INSERT, DELETE, SELECT ON pl_profiler_saved TO public;
