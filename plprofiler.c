@@ -396,6 +396,8 @@ profiler_func_end(PLpgSQL_execstate *estate, PLpgSQL_function *func)
 	uint64			us_elapsed;
 	uint64			us_self;
 	bool			graph_stacklevel_found = false;
+	lineHashKey		key;
+	lineEntry	   *entry;
 
 	/* Ignore anonymous code block. */
 	if (estate->plugin_info == NULL)
@@ -412,9 +414,6 @@ profiler_func_end(PLpgSQL_execstate *estate, PLpgSQL_function *func)
 	/* Loop through each line of source code and update the stats */
 	for(lineNo = 0; lineNo < profilerInfo->line_count; lineNo++)
 	{
-		lineHashKey		key;
-		lineEntry	   *entry;
-
 		stmt_stats *stats = profilerInfo->stmtStats + (lineNo + 1);
 
 		/* Set up key for hashtable search */
@@ -483,6 +482,35 @@ profiler_func_end(PLpgSQL_execstate *estate, PLpgSQL_function *func)
 
 		graph_stack.stack[graph_stack_pt] = InvalidOid;
 	}
+
+	/*
+	 * We also collect per function global counts in the pseudo line number
+	 * zero. The line stats are cumulative (for example a FOR ... LOOP
+	 * statement has the entire execution time of all statements in its
+	 * block), so this can't be derived from the actual per line data.
+	 */
+	key.func_oid = func->fn_oid;
+	key.line_number = 0;
+
+	entry = (lineEntry *)hash_search(line_stats, &key, HASH_FIND, NULL);
+
+	if (!entry)
+	{
+		entry = entry_alloc(&key, 0, 0);
+		if (!entry)
+		{
+			elog(ERROR, "Unable to allocate more space for the profiler. ");
+			return;
+		}
+	}
+
+	entry->counters.exec_count += 1;
+	entry->counters.total_time += us_elapsed;
+
+	if (us_elapsed > entry->counters.time_longest)
+		entry->counters.time_longest = us_elapsed;
+
+	entry = NULL;
 
 	/*
 	 * Finally if a plprofiler.save_interval is configured, save and reset

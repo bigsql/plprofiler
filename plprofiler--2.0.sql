@@ -107,9 +107,7 @@ GRANT SELECT ON pl_profiler_callgraph_current TO public;
 CREATE TABLE pl_profiler_saved (
 	s_id			serial						PRIMARY KEY,
     s_name			text						NOT NULL UNIQUE,
-	s_saved			timestamp with time zone	NOT NULL DEFAULT now(),
-	s_title			text						NOT NULL DEFAULT '',
-	s_desc			text						NOT NULL DEFAULT ''
+	s_options		text						NOT NULL DEFAULT ''
 );
 GRANT INSERT, DELETE, SELECT ON pl_profiler_saved TO public;
 
@@ -126,7 +124,7 @@ CREATE TABLE pl_profiler_saved_linestats (
 	l_exec_count	bigint,
 	l_total_time	bigint,
 	l_longest_time	bigint,
-	PRIMARY KEY (l_s_id, l_schema, l_funcname, l_funcargs, l_line_number)
+	PRIMARY KEY (l_s_id, l_funcoid, l_line_number)
 );
 GRANT INSERT, DELETE, SELECT ON pl_profiler_saved_linestats TO public;
 
