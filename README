@@ -106,23 +106,25 @@ Configuration
 The following configuration options can be set in the postgresql.conf
 file to control the behavior of PL Profiler:
 
-`*plprofiler.enabled*` = true/false # Used to enable/disable the profiler in all sessions. Note that for this GUC to work inside a session, the plprofiler must have been loaded via shared_preload_libraries. If that isn't done, use pl_profiler_enable(true) instead.
+`*plprofiler.enabled*` = true/false # Used to enable/disable the
+profiler in all sessions. Note that for this GUC to work inside a
+session, the plprofiler must have been loaded via shared_preload_libraries.
+If that isn't done, use pl_profiler_enable(true) instead.
 
-`*plprofiler.save_interval*` = seconds # If configured, the profiler will automatically
-call the pl_profiler_save_stats() function the first time, it collects data after this
-interval has elapsed. The default of 0 seconds turns auto-save off.
+`*plprofiler.save_interval*` = seconds # If configured, the profiler
+will automatically call the pl_profiler_save_stats() function the first
+time, it collects data after this interval has elapsed. The default of
+0 seconds turns auto-save off.
 
 `*plprofiler.save_linestats_table*` = 'tablename' # Sets the table name
 where pl_profiler_save_stats() inserts the current internal counters
-for linestats.
-Default is 'pl_profiler_linestats_data'. This table must be in the same
-namespace as the plprofiler extension.
+for linestats. Default is 'pl_profiler_linestats_data'. This table must
+be in the same namespace as the plprofiler extension.
 
 `*plprofiler.save_callgraph_table*` = 'tablename' # Sets the table name
 where pl_profiler_save_stats() inserts the current internal counters
-for callgraph.
-Default is 'pl_profiler_callgraph_data'. This table must be in the same
-namespace as the plprofiler extension.
+for callgraph. Default is 'pl_profiler_callgraph_data'. This table must
+be in the same namespace as the plprofiler extension.
 
 License
 =================================================================================
