@@ -117,6 +117,7 @@ CREATE TABLE pl_profiler_saved_linestats (
 	l_s_id			integer						NOT NULL
 												REFERENCES pl_profiler_saved
 												ON DELETE CASCADE,
+	l_funcoid		int8						NOT NULL,
 	l_schema		text						NOT NULL,
 	l_funcname		text						NOT NULL,
 	l_funcargs		text						NOT NULL,
