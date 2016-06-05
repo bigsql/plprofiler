@@ -27,19 +27,13 @@
 #include "mb/pg_wchar.h"
 #include "miscadmin.h"
 #include "utils/builtins.h"
-#include "utils/fmgroids.h"
 #include "utils/guc.h"
 #include "utils/palloc.h"
 #include "utils/memutils.h"
 #include "utils/syscache.h"
-#include "utils/lsyscache.h"
 #include "catalog/pg_proc.h"
 #include "catalog/pg_type.h"
-#include "catalog/pg_extension.h"
-#include "catalog/indexing.h"
 #include "catalog/namespace.h"
-#include "access/sysattr.h"
-#include "commands/extension.h"
 #include "plpgsql.h"
 #include "pgstat.h"
 
@@ -116,7 +110,6 @@ static MemoryContext	temp_mcxt = NULL;
 static HTAB			   *line_stats = NULL;
 
 static bool				profiler_enabled = false;
-static char			   *profiler_namespace = NULL;
 static int				profiler_save_interval = -1;
 static char			   *profiler_save_line_table = NULL;
 static char			   *profiler_save_callgraph_table = NULL;
@@ -176,7 +169,6 @@ static void callGraph_collect(uint64 us_elapsed, uint64 us_self,
 							  uint64 us_children);
 static void profiler_enabled_assign(bool newval, void *extra);
 static void profiler_save_stats(void);
-static Oid get_extension_schema(Oid ext_oid);
 
 /**********************************************************************
  * Exported Function definitions
@@ -223,7 +215,7 @@ _PG_init(void)
 							"per source line stats into",
 							NULL,
 							&profiler_save_line_table,
-							"pl_profiler_linestats_data",
+							NULL,
 							PGC_USERSET,
 							0,
 							NULL,
@@ -236,7 +228,7 @@ _PG_init(void)
 							"call graph stats into",
 							NULL,
 							&profiler_save_callgraph_table,
-							"pl_profiler_callgraph_data",
+							NULL,
 							PGC_USERSET,
 							0,
 							NULL,
@@ -610,6 +602,23 @@ findSource(Oid oid, HeapTuple *tup, char **funcName)
 }
 
 /* -------------------------------------------------------------------
+ * findFuncname()
+ *
+ * 	Return the name of a function by Oid.
+ * -------------------------------------------------------------------
+ */
+static char *
+findFuncname(Oid oid, HeapTuple *tup)
+{
+	*tup = SearchSysCache(PROCOID, ObjectIdGetDatum(oid), 0, 0, 0);
+
+	if(!HeapTupleIsValid(*tup))
+		return "<unknown>";
+
+	return NameStr(((Form_pg_proc)GETSTRUCT(*tup))->proname);
+}
+
+/* -------------------------------------------------------------------
  * scanSource()
  *
  *	This function scans through the source code for a given function
@@ -797,46 +806,6 @@ profiler_save_stats(void)
 	SPI_push();
 	DirectFunctionCall1(pl_profiler_save_stats, (Datum)0);
 	SPI_pop();
-}
-
-/* No idea why this one is static in extensions.c - Jan */
-/*
- * get_extension_schema - given an extension OID, fetch its extnamespace
- *
- * Returns InvalidOid if no such extension.
- */
-static Oid
-get_extension_schema(Oid ext_oid)
-{
-	Oid			result;
-	Relation	rel;
-	SysScanDesc scandesc;
-	HeapTuple	tuple;
-	ScanKeyData entry[1];
-
-	rel = heap_open(ExtensionRelationId, AccessShareLock);
-
-	ScanKeyInit(&entry[0],
-				ObjectIdAttributeNumber,
-				BTEqualStrategyNumber, F_OIDEQ,
-				ObjectIdGetDatum(ext_oid));
-
-	scandesc = systable_beginscan(rel, ExtensionOidIndexId, true,
-								  NULL, 1, entry);
-
-	tuple = systable_getnext(scandesc);
-
-	/* We assume that there can be at most one matching tuple */
-	if (HeapTupleIsValid(tuple))
-		result = ((Form_pg_extension) GETSTRUCT(tuple))->extnamespace;
-	else
-		result = InvalidOid;
-
-	systable_endscan(scandesc);
-
-	heap_close(rel, AccessShareLock);
-
-	return result;
 }
 
 /**********************************************************************
@@ -1081,32 +1050,25 @@ pl_profiler_callgraph(PG_FUNCTION_ARGS)
 			oldcontext = MemoryContextSwitchTo(temp_mcxt);
 			for (i = 0; i < PL_MAX_STACK_DEPTH && entry->key.stack[i] != InvalidOid; i++)
 			{
+				HeapTuple	procTup;
 				char	   *funcname;
-				char	   *nspname;
 
-				funcname = get_func_name(entry->key.stack[i]);
-				if (funcname != NULL)
+				funcname = findFuncname(entry->key.stack[i], &procTup);
+				if (HeapTupleIsValid(procTup))
 				{
-					nspname = get_namespace_name(get_func_namespace(entry->key.stack[i]));
-					if (nspname == NULL)
-						nspname = pstrdup("<unknown>");
 					funcargs = DirectFunctionCall1(pg_get_function_arguments,
 												   ObjectIdGetDatum(entry->key.stack[i]));
 					funcargs_s = DatumGetPointer(DirectFunctionCall1(textout, funcargs));
+					ReleaseSysCache(procTup);
 				}
 				else
 				{
-					nspname = pstrdup("<unknown>");
-					funcname = pstrdup("<unknown>");
 					funcargs_s = "<unknown>";
 				}
 
 				snprintf(funcdef_buf, sizeof(funcdef_buf),
-						 "%s.%s(%s) oid=%d", nspname, funcname, funcargs_s,
+						 "%s(%s) oid=%d", funcname, funcargs_s,
 						 entry->key.stack[i]);
-
-				pfree(nspname);
-				pfree(funcname);
 
 				funcdefs[i] = PointerGetDatum(cstring_to_text(funcdef_buf));
 			}
@@ -1194,26 +1156,10 @@ pl_profiler_save_stats(PG_FUNCTION_ARGS)
 	HASH_SEQ_STATUS		hash_seq;
 	lineEntry		   *lineEnt;
 	callGraphEntry	   *callGraphEnt;
-	char				query[256 + NAMEDATALEN * 2];
-	int32				result = 0;
+	char				query[256];
 
 	if (SPI_connect() != SPI_OK_CONNECT)
 		elog(ERROR, "SPI_connect() failed in pl_profiler_save_stats()");
-
-	/*
-	 * If not done yet, figure out which namespace the plprofiler
-	 * extension is installed in.
-	 */
-	if (profiler_namespace == NULL)
-	{
-		MemoryContext	oldcxt;
-
-		/* Figure out our extension installation schema. */
-		oldcxt = MemoryContextSwitchTo(TopMemoryContext);
-		profiler_namespace = get_namespace_name(get_extension_schema(
-							 get_extension_oid("plprofiler", false)));
-		MemoryContextSwitchTo(oldcxt);
-	}
 
 	/*
 	 * If we have the hash table for line stats and the table name
@@ -1224,31 +1170,27 @@ pl_profiler_save_stats(PG_FUNCTION_ARGS)
 	if (line_stats != NULL && profiler_save_line_table != NULL)
 	{
 		snprintf(query, sizeof(query),
-				 "INSERT INTO \"%s\".\"%s\" "
+				 "INSERT INTO %s "
 				 "    SELECT func_oid, line_number, exec_count, total_time, "
 				 "			 longest_time "
-				 "    FROM \"%s\".pl_profiler_linestats()",
-				 profiler_namespace, profiler_save_line_table,
-				 profiler_namespace);
+				 "    FROM pl_profiler_linestats()",
+				 profiler_save_line_table);
 		SPI_exec(query, 0);
 
 		hash_seq_init(&hash_seq, line_stats);
 		while ((lineEnt = hash_seq_search(&hash_seq)) != NULL)
 			memset(&(lineEnt->counters), 0, sizeof(Counters));
-
-		result += SPI_processed;
 	}
 
 	/* Same with call graph stats. */
 	if (callGraph_stats != NULL && profiler_save_callgraph_table != NULL)
 	{
 		snprintf(query, sizeof(query),
-				 "INSERT INTO \"%s\".\"%s\" "
+				 "INSERT INTO %s "
 				 "    SELECT stack, call_count, us_total, "
 				 "           us_children, us_self "
-				 "    FROM \"%s\".pl_profiler_callgraph()",
-				 profiler_namespace, profiler_save_callgraph_table,
-				 profiler_namespace);
+				 "    FROM pl_profiler_callgraph()",
+				 profiler_save_callgraph_table);
 		SPI_exec(query, 0);
 
 		hash_seq_init(&hash_seq, callGraph_stats);
@@ -1259,12 +1201,10 @@ pl_profiler_save_stats(PG_FUNCTION_ARGS)
 			callGraphEnt->childTime = 0;
 			callGraphEnt->selfTime = 0;
 		}
-
-		result += SPI_processed;
 	}
 
 	SPI_finish();
 
-	PG_RETURN_INT32(result);
+	PG_RETURN_VOID();
 }
 

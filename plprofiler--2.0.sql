@@ -46,7 +46,7 @@ LANGUAGE C;
 GRANT EXECUTE ON FUNCTION pl_profiler_enable(bool) TO public;
 
 CREATE FUNCTION pl_profiler_save_stats()
-RETURNS int4
+RETURNS void
 AS 'MODULE_PATHNAME'
 LANGUAGE C;
 GRANT EXECUTE ON FUNCTION pl_profiler_save_stats() TO public;

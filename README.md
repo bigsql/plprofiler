@@ -1,12 +1,12 @@
 PL Profiler extension
 =====================
 
-This extension implements performance profiling for PLpgSQL code.
+This extension implements performance profiling for PLpgSQL code. 
 
 Supported PostgreSQL versions
 ---------------------------------------------------------------------------------
-plprofiler strives to support as many community-supported major versions of
-Postgres as reasonable. Currently, the following versions of PostgreSQL are
+plprofiler strives to support as many community-supported major versions of 
+Postgres as reasonable. Currently, the following versions of PostgreSQL are 
 supported:
 
 9.2 - 9.5
@@ -18,9 +18,9 @@ Once installed, creates the following objects.
 pl_profiler_linestats_current view
 ----------------------------------
 
-Summarizes profile of each function executed. Each entry represents a line of
+Summarizes profile of each function executed. Each entry represents a line of 
 PLpgSQL code in a function. This view shows the current content of the data
-currently collected in memory for this session only.
+currently collected in memory for this session only. 
 
 +---------------------+------------------+---------------------------------------------------------------------+
 | Name                | Type             | Description                                                         |
@@ -106,23 +106,19 @@ Configuration
 The following configuration options can be set in the postgresql.conf
 file to control the behavior of PL Profiler:
 
-`*plprofiler.enabled*` = true/false # Used to enable/disable the profiler in all sessions. Note that for this GUC to work inside a session, the plprofiler must have been loaded via shared_preload_libraries. If that isn't done, use pl_profiler_enable(true) instead.
+`*plprofiler.enabled*` = true/false # Used to enable/disable the profiler in all sessions.
 
 `*plprofiler.save_interval*` = seconds # If configured, the profiler will automatically
 call the pl_profiler_save_stats() function the first time, it collects data after this
 interval has elapsed. The default of 0 seconds turns auto-save off.
 
-`*plprofiler.save_linestats_table*` = 'tablename' # Sets the table name
-where pl_profiler_save_stats() inserts the current internal counters
-for linestats.
-Default is 'pl_profiler_linestats_data'. This table must be in the same
-namespace as the plprofiler extension.
+`*plprofiler.save_linestats_table*` = 'tablename' # Must be set to
+'public.pl_profiler_liststats_data' for the pl_profiler_save_stats()
+function to save the line stats data and reset the internal counters.
 
-`*plprofiler.save_callgraph_table*` = 'tablename' # Sets the table name
-where pl_profiler_save_stats() inserts the current internal counters
-for callgraph.
-Default is 'pl_profiler_callgraph_data'. This table must be in the same
-namespace as the plprofiler extension.
+`*plprofiler.save_callgraph_table*` = 'tablename' # Must be set to
+'public.pl_profiler_callgraph_data' for the pl_profiler_save_stats()
+function to save the call graph data and reset the internal counters.
 
 License
 =================================================================================
