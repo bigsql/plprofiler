@@ -343,7 +343,7 @@ profiler_func_beg(PLpgSQL_execstate *estate, PLpgSQL_function *func)
 	 * At entry time of a function we push it onto the graph call stack
 	 * and remember the entry time.
 	 */
-	current_xid = GetCurrentTransactionId();
+	current_xid = GetTopTransactionId();
 
 	if (graph_stack_pt > 0 && graph_current_xid != current_xid)
 	{
@@ -354,6 +354,7 @@ profiler_func_beg(PLpgSQL_execstate *estate, PLpgSQL_function *func)
 		 */
 		memset(&graph_stack, 0, sizeof(graph_stack));
 		graph_stack_pt = 0;
+		elog(DEBUG1, "stale call stack reset");
 	}
 	graph_current_xid = current_xid;
 
@@ -386,6 +387,7 @@ profiler_func_end(PLpgSQL_execstate *estate, PLpgSQL_function *func)
 	instr_time		now;
 	uint64			us_elapsed;
 	uint64			us_self;
+	bool			graph_stacklevel_found = false;
 
 	/* Ignore anonymous code block. */
 	if (estate->plugin_info == NULL)
@@ -435,20 +437,44 @@ profiler_func_end(PLpgSQL_execstate *estate, PLpgSQL_function *func)
 
 	/* At function exit we collect the call graphs. */
     if (graph_stack_pt <= 0)
-		elog(ERROR, "pl_callgraph stack underrun");
+	{
+		elog(DEBUG1, "pl_callgraph stack underrun");
+		return;
+	}
 
-	graph_stack_pt--;
-	INSTR_TIME_SET_CURRENT(now);
-	INSTR_TIME_SUBTRACT(now, graph_stack_entry[graph_stack_pt]);
-	us_elapsed = INSTR_TIME_GET_MICROSEC(now);
-	us_self = us_elapsed - graph_stack_child_time[graph_stack_pt];
+	/*
+	 * Unwind the call stack. In the case of exceptions it is possible
+	 * that the callback for func_end didn't happen as would be the
+	 * case for
+	 *
+	 *     function_one() calls function_two()
+	 *         function_two() exception happens
+	 *     function_one() catches exception and exits.
+	 *
+	 * In that case the func_end callback for function_one() must unwind
+	 * the stack until it finds itself.
+	 */
+	while (graph_stack_pt > 0 && !graph_stacklevel_found)
+	{
+		graph_stack_pt--;
 
-	if (graph_stack_pt > 0)
-		graph_stack_child_time[graph_stack_pt - 1] += us_elapsed;
+		if (graph_stack.stack[graph_stack_pt] == func->fn_oid)
+			graph_stacklevel_found = true;
+		else
+			elog(DEBUG1, "unwinding extra graph stacklevel for %d", func->fn_oid);
 
-	callGraph_collect(us_elapsed, us_self, graph_stack_child_time[graph_stack_pt]);
+		INSTR_TIME_SET_CURRENT(now);
+		INSTR_TIME_SUBTRACT(now, graph_stack_entry[graph_stack_pt]);
+		us_elapsed = INSTR_TIME_GET_MICROSEC(now);
+		us_self = us_elapsed - graph_stack_child_time[graph_stack_pt];
 
-	graph_stack.stack[graph_stack_pt] = InvalidOid;
+		if (graph_stack_pt > 0)
+			graph_stack_child_time[graph_stack_pt - 1] += us_elapsed;
+
+		callGraph_collect(us_elapsed, us_self, graph_stack_child_time[graph_stack_pt]);
+
+		graph_stack.stack[graph_stack_pt] = InvalidOid;
+	}
 
 	/*
 	 * Finally if a plprofiler.save_interval is configured, save and reset
