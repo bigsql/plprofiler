@@ -149,3 +149,42 @@ CREATE TABLE pl_profiler_saved_callgraph (
 	PRIMARY KEY (c_s_id, c_stack)
 );
 GRANT INSERT, DELETE, SELECT ON pl_profiler_saved_callgraph TO public;
+
+CREATE FUNCTION pl_profiler_source_lines(
+	IN  func_oid oid,
+	OUT source text,
+	OUT line_number bigint)
+RETURNS SETOF RECORD
+AS $$
+    SELECT *, row_number() OVER ()
+		FROM regexp_split_to_table((SELECT prosrc
+										FROM pg_catalog.pg_proc
+										WHERE oid = func_oid),
+									E'\\n')
+$$ LANGUAGE sql;
+GRANT EXECUTE ON FUNCTION pl_profiler_source_lines(oid) TO public;
+
+CREATE VIEW pl_profiler_all_source AS
+	SELECT P.oid AS func_oid,
+		   S.line_number,
+		   S.source
+		FROM pg_catalog.pg_proc P,
+			 pg_catalog.pg_language L,
+			 pl_profiler_source_lines(P.oid) S
+		WHERE L.lanname = 'plpgsql'
+		  AND P.prolang = L.oid;
+GRANT SELECT ON pl_profiler_all_source TO public;
+
+CREATE VIEW pl_profiler_all_functions AS
+	SELECT P.oid AS func_oid,
+		   N.nspname AS func_schema,
+		   P.proname AS func_name,
+		   pg_catalog.pg_get_function_result(P.oid) AS func_result,
+		   pg_catalog.pg_get_function_arguments(P.oid) AS func_arguments
+		FROM pg_catalog.pg_proc P,
+			 pg_catalog.pg_language L,
+			 pg_catalog.pg_namespace N
+		WHERE L.lanname = 'plpgsql'
+		  AND P.prolang = L.oid
+		  AND N.oid = P.pronamespace;
+GRANT SELECT ON pl_profiler_all_functions TO public;
