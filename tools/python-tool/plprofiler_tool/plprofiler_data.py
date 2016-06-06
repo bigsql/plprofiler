@@ -135,7 +135,8 @@ def save_data(argv):
                         (c_s_id, c_stack, c_call_count, c_us_total,
                          c_us_children, c_us_self)
                     SELECT currval('pl_profiler_saved_s_id_seq') as s_id,
-                           stack, sum(call_count), sum(us_total),
+                           pl_profiler_get_stack(stack) as stack,
+                           sum(call_count), sum(us_total),
                            sum(us_children), sum(us_self)
                     FROM pl_profiler_callgraph_data
                     GROUP BY s_id, stack
