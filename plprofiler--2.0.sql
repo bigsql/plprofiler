@@ -120,14 +120,22 @@ CREATE TABLE pl_profiler_saved (
 );
 GRANT INSERT, DELETE, SELECT ON pl_profiler_saved TO public;
 
+CREATE TABLE pl_profiler_saved_functions (
+	f_s_id			integer						NOT NULL
+												REFERENCES pl_profiler_saved
+												ON DELETE CASCADE,
+	f_funcoid		int8						NOT NULL,
+	f_schema		text						NOT NULL,
+	f_funcname		text						NOT NULL,
+	f_funcresult	text						NOT NULL,
+	f_funcargs		text						NOT NULL,
+	PRIMARY KEY (f_s_id, f_funcoid)
+);
 CREATE TABLE pl_profiler_saved_linestats (
 	l_s_id			integer						NOT NULL
 												REFERENCES pl_profiler_saved
 												ON DELETE CASCADE,
 	l_funcoid		int8						NOT NULL,
-	l_schema		text						NOT NULL,
-	l_funcname		text						NOT NULL,
-	l_funcargs		text						NOT NULL,
 	l_line_number	int4						NOT NULL,
 	l_source		text,
 	l_exec_count	bigint,
