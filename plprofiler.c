@@ -85,6 +85,7 @@ typedef struct Counters
 	int64			exec_count;
 	int64			total_time;
 	int64			time_longest;
+	bool			isnew;
 } Counters;
 
 typedef struct lineEntry
@@ -802,6 +803,7 @@ entry_alloc(lineHashKey *key, int64 line_offset, int64 line_len)
 		memset(&entry->counters, 0, sizeof(Counters));
 		entry->line_offset = line_offset;
 		entry->line_len = line_len;
+		entry->counters.isnew = true;
 	}
 
 	return entry;
@@ -1046,6 +1048,7 @@ Datum
 pl_profiler_linestats(PG_FUNCTION_ARGS)
 {
 	ReturnSetInfo	   *rsinfo = (ReturnSetInfo *)fcinfo->resultinfo;
+	bool				filter_zero = PG_GETARG_BOOL(0);
 	TupleDesc			tupdesc;
 	Tuplestorestate	   *tupstore;
 	MemoryContext		per_query_ctx;
@@ -1088,6 +1091,27 @@ pl_profiler_linestats(PG_FUNCTION_ARGS)
 			bool		nulls[PL_PROFILE_COLS];
 			int			i = 0;
 
+			/*
+			 * If filter_zero is true we are called from
+			 * pl_profiler_save_stats() to save the current hash table
+			 * data into pl_profiler_linestats_data. We filter out
+			 * rows that are not new and have a zero exec_count.
+			 */
+			if (filter_zero)
+			{
+				if (entry->counters.isnew)
+				{
+					entry->counters.isnew = false;
+				}
+				else
+				{
+					if (entry->counters.exec_count == 0 &&
+						entry->counters.total_time == 0)
+						continue;
+				}
+			}
+
+			/* Include this entry in the result. */
 			memset(values, 0, sizeof(values));
 			memset(nulls, 0, sizeof(nulls));
 
@@ -1282,7 +1306,7 @@ pl_profiler_save_stats(PG_FUNCTION_ARGS)
 				 "INSERT INTO \"%s\".\"%s\" "
 				 "    SELECT func_oid, line_number, exec_count, total_time, "
 				 "			 longest_time "
-				 "    FROM \"%s\".pl_profiler_linestats()",
+				 "    FROM \"%s\".pl_profiler_linestats(true)",
 				 profiler_namespace, profiler_save_line_table,
 				 profiler_namespace);
 		SPI_exec(query, 0);

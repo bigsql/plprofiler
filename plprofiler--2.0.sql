@@ -4,6 +4,7 @@
 -- Register functions.
 
 CREATE FUNCTION pl_profiler_linestats(
+	IN  filter_zero bool,
     OUT func_oid oid,
     OUT line_number int8,
     OUT exec_count int8,
@@ -13,7 +14,7 @@ CREATE FUNCTION pl_profiler_linestats(
 RETURNS SETOF record
 AS 'MODULE_PATHNAME'
 LANGUAGE C;
-GRANT EXECUTE ON FUNCTION pl_profiler_linestats() TO public;
+GRANT EXECUTE ON FUNCTION pl_profiler_linestats(bool) TO public;
 
 CREATE FUNCTION pl_profiler_callgraph(
     OUT stack oid[],
@@ -101,7 +102,7 @@ CREATE VIEW pl_profiler_linestats_current AS
   SELECT func_oid, line_number,
 		pl_profiler_get_source(func_oid, line_number) as line,
 		exec_count, total_time, longest_time
-    FROM pl_profiler_linestats()
+    FROM pl_profiler_linestats(false)
    ORDER BY func_oid, line_number;
 GRANT SELECT ON pl_profiler_linestats_current TO public;
 
