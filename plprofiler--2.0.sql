@@ -16,7 +16,7 @@ LANGUAGE C;
 GRANT EXECUTE ON FUNCTION pl_profiler_linestats() TO public;
 
 CREATE FUNCTION pl_profiler_callgraph(
-    OUT stack text[],
+    OUT stack oid[],
     OUT call_count int8,
     OUT us_total int8,
     OUT us_children int8,
@@ -32,6 +32,12 @@ RETURNS text
 AS 'MODULE_PATHNAME'
 LANGUAGE C;
 GRANT EXECUTE ON FUNCTION pl_profiler_get_source(oid, int8) TO public;
+
+CREATE FUNCTION pl_profiler_get_stack(stack oid[])
+RETURNS text[]
+AS 'MODULE_PATHNAME'
+LANGUAGE C;
+GRANT EXECUTE ON FUNCTION pl_profiler_get_stack(oid[]) TO public;
 
 CREATE FUNCTION pl_profiler_reset()
 RETURNS void
@@ -61,7 +67,7 @@ CREATE TABLE pl_profiler_linestats_data (
 GRANT INSERT, SELECT ON pl_profiler_linestats_data TO public;
 
 CREATE TABLE pl_profiler_callgraph_data (
-    stack			text[],
+    stack			oid[],
 	call_count		int8,
 	us_total		int8,
 	us_children		int8,
@@ -82,7 +88,7 @@ CREATE VIEW pl_profiler_linestats AS
 GRANT SELECT ON pl_profiler_linestats TO public;
 
 CREATE VIEW pl_profiler_callgraph AS
-	SELECT stack,
+	SELECT pl_profiler_get_stack(stack) AS stack,
 		   sum(call_count) AS call_count,
 		   sum(us_total) AS us_total,
 		   sum(us_children) AS us_children,
@@ -100,7 +106,8 @@ CREATE VIEW pl_profiler_linestats_current AS
 GRANT SELECT ON pl_profiler_linestats_current TO public;
 
 CREATE VIEW pl_profiler_callgraph_current AS
-  SELECT stack, call_count, us_total, us_children, us_self
+	SELECT pl_profiler_get_stack(stack), call_count,
+		   us_total, us_children, us_self
     FROM pl_profiler_callgraph();
 GRANT SELECT ON pl_profiler_callgraph_current TO public;
 

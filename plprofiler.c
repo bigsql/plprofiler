@@ -26,6 +26,7 @@
 #include "funcapi.h"
 #include "mb/pg_wchar.h"
 #include "miscadmin.h"
+#include "utils/array.h"
 #include "utils/builtins.h"
 #include "utils/fmgroids.h"
 #include "utils/guc.h"
@@ -112,7 +113,6 @@ typedef struct callGraphEntry
  * Local variables
  */
 static MemoryContext	profiler_mcxt = NULL;
-static MemoryContext	temp_mcxt = NULL;
 static HTAB			   *line_stats = NULL;
 
 static bool				profiler_enabled = false;
@@ -132,6 +132,7 @@ static time_t			last_save_time = 0;
 PLpgSQL_plugin		  **plugin_ptr = NULL;
 
 Datum pl_profiler_get_source(PG_FUNCTION_ARGS);
+Datum pl_profiler_get_stack(PG_FUNCTION_ARGS);
 Datum pl_profiler_linestats(PG_FUNCTION_ARGS);
 Datum pl_profiler_callgraph(PG_FUNCTION_ARGS);
 Datum pl_profiler_reset(PG_FUNCTION_ARGS);
@@ -139,6 +140,7 @@ Datum pl_profiler_enable(PG_FUNCTION_ARGS);
 Datum pl_profiler_save_stats(PG_FUNCTION_ARGS);
 
 PG_FUNCTION_INFO_V1(pl_profiler_get_source);
+PG_FUNCTION_INFO_V1(pl_profiler_get_stack);
 PG_FUNCTION_INFO_V1(pl_profiler_linestats);
 PG_FUNCTION_INFO_V1(pl_profiler_callgraph);
 PG_FUNCTION_INFO_V1(pl_profiler_reset);
@@ -689,12 +691,6 @@ InitHashTable(void)
 										  ALLOCSET_DEFAULT_INITSIZE,
 										  ALLOCSET_DEFAULT_MAXSIZE);
 
-	temp_mcxt = AllocSetContextCreate(profiler_mcxt,
-										  "PL/pgSQL profiler temp",
-										  ALLOCSET_DEFAULT_MINSIZE,
-										  ALLOCSET_DEFAULT_INITSIZE,
-										  ALLOCSET_DEFAULT_MAXSIZE);
-
 	/* Create the hash table for line stats */
 	MemSet(&hash_ctl, 0, sizeof(hash_ctl));
 
@@ -922,6 +918,7 @@ pl_profiler_get_source(PG_FUNCTION_ARGS)
 		int		line_no;
 		int64  *line_offset;
 		int64  *line_len;
+		bool	found;
 
 		num_lines = scanSource(procSrc, NULL, NULL);
 		line_offset = palloc(num_lines * sizeof(int64));
@@ -935,13 +932,14 @@ pl_profiler_get_source(PG_FUNCTION_ARGS)
 		}
 
 		key.line_number = func_line;
-		entry = (lineEntry *)hash_search(line_stats, &key, HASH_FIND, NULL);
+		entry = (lineEntry *)hash_search(line_stats, &key, HASH_ENTER, &found);
 
-		if (!entry)
+		if (!found)
 		{
-			ReleaseSysCache(procTuple);
-			elog(NOTICE, "still no entry???");
-			PG_RETURN_NULL();
+			memcpy(&(entry->key), &graph_stack, sizeof(entry->key));
+			entry->counters.exec_count = 0;
+			entry->counters.total_time = 0;
+			entry->counters.time_longest = 0;
 		}
 	}
 
@@ -964,6 +962,78 @@ pl_profiler_get_source(PG_FUNCTION_ARGS)
 	pfree(resbuf);
 	PG_RETURN_TEXT_P(result);
 }
+
+/* -------------------------------------------------------------------
+ * pl_profiler_get_stack(stack oid[])
+ *
+ *	Converts a stack in Oid[] format into a text[].
+ * -------------------------------------------------------------------
+ */
+Datum
+pl_profiler_get_stack(PG_FUNCTION_ARGS)
+{
+	ArrayType	   *stack_in = PG_GETARG_ARRAYTYPE_P(0);
+	Datum		   *stack_oid;
+	bool		   *nulls;
+	int				nelems;
+	int				i;
+	Datum		   *funcdefs;
+	char			funcdef_buf[8192];
+	Datum			funcargs;
+	char		   *funcargs_s;
+
+	/* Take the array apart */
+	deconstruct_array(stack_in, OIDOID,
+					  sizeof(Oid), true, 'i',
+					  &stack_oid, &nulls, &nelems);
+
+	/* Allocate the Datum array for the individual function signatures. */
+	funcdefs = palloc(sizeof(Datum) * nelems);
+
+	/*
+	 * Turn each of the function Oids, that are in the array, into
+	 * a text that is "schema.funcname(funcargs) oid=funcoid".
+	 */
+	for (i = 0; i < nelems; i++)
+	{
+		char	   *funcname;
+		char	   *nspname;
+
+		funcname = get_func_name(DatumGetObjectId(stack_oid[i]));
+		if (funcname != NULL)
+		{
+			nspname = get_namespace_name(get_func_namespace(DatumGetObjectId(stack_oid[i])));
+			if (nspname == NULL)
+				nspname = pstrdup("<unknown>");
+			funcargs = DirectFunctionCall1(pg_get_function_arguments,
+										   stack_oid[i]);
+			funcargs_s = DatumGetPointer(DirectFunctionCall1(textout, funcargs));
+		}
+		else
+		{
+			nspname = pstrdup("<unknown>");
+			funcname = pstrdup("<unknown>");
+			funcargs_s = "<unknown>";
+		}
+
+		snprintf(funcdef_buf, sizeof(funcdef_buf),
+				 "%s.%s(%s) oid=%d", nspname, funcname, funcargs_s,
+				 DatumGetObjectId(stack_oid[i]));
+
+		pfree(nspname);
+		pfree(funcname);
+
+		funcdefs[i] = PointerGetDatum(cstring_to_text(funcdef_buf));
+	}
+
+	/* Return the texts as a text[]. */
+	PG_RETURN_ARRAYTYPE_P(PointerGetDatum(construct_array(funcdefs, nelems,
+														  TEXTOID, -1,
+														  false, 'i')));
+}
+
+
+
 
 /* -------------------------------------------------------------------
  * pl_profiler_linestats()
@@ -1092,9 +1162,6 @@ pl_profiler_callgraph(PG_FUNCTION_ARGS)
 			Datum		values[PL_CALLGRAPH_COLS];
 			bool		nulls[PL_CALLGRAPH_COLS];
 			Datum		funcdefs[PL_MAX_STACK_DEPTH];
-			char		funcdef_buf[8192];
-			Datum		funcargs;
-			char	   *funcargs_s;
 
 			int			i = 0;
 			int			j = 0;
@@ -1102,47 +1169,12 @@ pl_profiler_callgraph(PG_FUNCTION_ARGS)
 			memset(values, 0, sizeof(values));
 			memset(nulls, 0, sizeof(nulls));
 
-			/*
-			 * Switch to the temporary memory context and assemble the
-			 * text array showing the callstack as { 'funcname(args)' [, ...] }
-			 */
-			oldcontext = MemoryContextSwitchTo(temp_mcxt);
 			for (i = 0; i < PL_MAX_STACK_DEPTH && entry->key.stack[i] != InvalidOid; i++)
-			{
-				char	   *funcname;
-				char	   *nspname;
-
-				funcname = get_func_name(entry->key.stack[i]);
-				if (funcname != NULL)
-				{
-					nspname = get_namespace_name(get_func_namespace(entry->key.stack[i]));
-					if (nspname == NULL)
-						nspname = pstrdup("<unknown>");
-					funcargs = DirectFunctionCall1(pg_get_function_arguments,
-												   ObjectIdGetDatum(entry->key.stack[i]));
-					funcargs_s = DatumGetPointer(DirectFunctionCall1(textout, funcargs));
-				}
-				else
-				{
-					nspname = pstrdup("<unknown>");
-					funcname = pstrdup("<unknown>");
-					funcargs_s = "<unknown>";
-				}
-
-				snprintf(funcdef_buf, sizeof(funcdef_buf),
-						 "%s.%s(%s) oid=%d", nspname, funcname, funcargs_s,
-						 entry->key.stack[i]);
-
-				pfree(nspname);
-				pfree(funcname);
-
-				funcdefs[i] = PointerGetDatum(cstring_to_text(funcdef_buf));
-			}
+				funcdefs[i] = ObjectIdGetDatum(entry->key.stack[i]);
 
 			values[j++] = PointerGetDatum(construct_array(funcdefs, i,
-														  TEXTOID, -1,
-														  false, 'i'));
-
+														  OIDOID, sizeof(Oid),
+														  true, 'i'));
 			values[j++] = Int64GetDatumFast(entry->callCount);
 			values[j++] = Int64GetDatumFast(entry->totalTime);
 			values[j++] = Int64GetDatumFast(entry->childTime);
@@ -1151,9 +1183,6 @@ pl_profiler_callgraph(PG_FUNCTION_ARGS)
 			Assert(j == PL_CALLGRAPH_COLS);
 
 			tuplestore_putvalues(tupstore, tupdesc, values, nulls);
-
-			MemoryContextSwitchTo(oldcontext);
-			MemoryContextReset(temp_mcxt);
 		}
 	}
 
@@ -1179,8 +1208,6 @@ pl_profiler_reset(PG_FUNCTION_ARGS)
 				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
 				 errmsg("pl_profiler must be loaded")));
 
-	MemoryContextDelete(temp_mcxt);
-	temp_mcxt = NULL;
 	MemoryContextDelete(profiler_mcxt);
 	profiler_mcxt = NULL;
 	line_stats = NULL;
