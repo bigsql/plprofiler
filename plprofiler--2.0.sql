@@ -17,6 +17,7 @@ LANGUAGE C;
 GRANT EXECUTE ON FUNCTION pl_profiler_linestats(bool) TO public;
 
 CREATE FUNCTION pl_profiler_callgraph(
+	IN  filter_zero bool,
     OUT stack oid[],
     OUT call_count int8,
     OUT us_total int8,
@@ -26,7 +27,7 @@ CREATE FUNCTION pl_profiler_callgraph(
 RETURNS SETOF record
 AS 'MODULE_PATHNAME'
 LANGUAGE C;
-GRANT EXECUTE ON FUNCTION pl_profiler_callgraph() TO public;
+GRANT EXECUTE ON FUNCTION pl_profiler_callgraph(bool) TO public;
 
 CREATE FUNCTION pl_profiler_get_source(func oid, lineno int8)
 RETURNS text
@@ -109,7 +110,7 @@ GRANT SELECT ON pl_profiler_linestats_current TO public;
 CREATE VIEW pl_profiler_callgraph_current AS
 	SELECT pl_profiler_get_stack(stack), call_count,
 		   us_total, us_children, us_self
-    FROM pl_profiler_callgraph();
+    FROM pl_profiler_callgraph(false);
 GRANT SELECT ON pl_profiler_callgraph_current TO public;
 
 CREATE TABLE pl_profiler_saved (

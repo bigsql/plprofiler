@@ -1144,6 +1144,7 @@ Datum
 pl_profiler_callgraph(PG_FUNCTION_ARGS)
 {
 	ReturnSetInfo	   *rsinfo = (ReturnSetInfo *)fcinfo->resultinfo;
+	bool				filter_zero = PG_GETARG_BOOL(0);
 	TupleDesc			tupdesc;
 	Tuplestorestate	   *tupstore;
 	MemoryContext		per_query_ctx;
@@ -1189,6 +1190,13 @@ pl_profiler_callgraph(PG_FUNCTION_ARGS)
 
 			int			i = 0;
 			int			j = 0;
+
+			/*
+			 * Filter out call stacks that have not been seen since
+			 * the last save_stats() call.
+			 */
+			if (filter_zero && entry->callCount == 0)
+				continue;
 
 			memset(values, 0, sizeof(values));
 			memset(nulls, 0, sizeof(nulls));
@@ -1325,7 +1333,7 @@ pl_profiler_save_stats(PG_FUNCTION_ARGS)
 				 "INSERT INTO \"%s\".\"%s\" "
 				 "    SELECT stack, call_count, us_total, "
 				 "           us_children, us_self "
-				 "    FROM \"%s\".pl_profiler_callgraph()",
+				 "    FROM \"%s\".pl_profiler_callgraph(true)",
 				 profiler_namespace, profiler_save_callgraph_table,
 				 profiler_namespace);
 		SPI_exec(query, 0);
