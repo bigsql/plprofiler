@@ -131,6 +131,8 @@ CREATE TABLE pl_profiler_saved_functions (
 	f_funcargs		text						NOT NULL,
 	PRIMARY KEY (f_s_id, f_funcoid)
 );
+GRANT INSERT, DELETE, SELECT ON pl_profiler_saved_functions TO public;
+
 CREATE TABLE pl_profiler_saved_linestats (
 	l_s_id			integer						NOT NULL
 												REFERENCES pl_profiler_saved
