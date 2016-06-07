@@ -69,8 +69,6 @@ typedef struct
 typedef struct
 {
 	int				line_count;		/* Number of lines in this function */
-	int64		   *line_offset;	/* Offset in source where lines start */
-	int64		   *line_len;		/* Length of source lines */
 	stmt_stats	   *stmtStats;		/* Performance counters for each line */
 } profilerCtx;
 
@@ -92,8 +90,6 @@ typedef struct lineEntry
 {
 	lineHashKey		key;			/* hash key of entry - MUST BE FIRST */
 	Counters		counters;		/* the statistics for this line */
-	int64			line_offset;	/* line source offset */
-	int64			line_len;		/* line source length */
 } lineEntry;
 
 typedef struct callGraphKey
@@ -132,7 +128,6 @@ static time_t			last_save_time = 0;
 
 PLpgSQL_plugin		  **plugin_ptr = NULL;
 
-Datum pl_profiler_get_source(PG_FUNCTION_ARGS);
 Datum pl_profiler_get_stack(PG_FUNCTION_ARGS);
 Datum pl_profiler_linestats(PG_FUNCTION_ARGS);
 Datum pl_profiler_callgraph(PG_FUNCTION_ARGS);
@@ -140,7 +135,6 @@ Datum pl_profiler_reset(PG_FUNCTION_ARGS);
 Datum pl_profiler_enable(PG_FUNCTION_ARGS);
 Datum pl_profiler_save_stats(PG_FUNCTION_ARGS);
 
-PG_FUNCTION_INFO_V1(pl_profiler_get_source);
 PG_FUNCTION_INFO_V1(pl_profiler_get_stack);
 PG_FUNCTION_INFO_V1(pl_profiler_linestats);
 PG_FUNCTION_INFO_V1(pl_profiler_callgraph);
@@ -167,14 +161,13 @@ static void profiler_stmt_beg(PLpgSQL_execstate *estate, PLpgSQL_stmt *stmt);
 static void profiler_stmt_end(PLpgSQL_execstate *estate, PLpgSQL_stmt *stmt);
 
 static char *findSource(Oid oid, HeapTuple *tup, char **funcName);
-static int scanSource(const char *src, int64 *line_offset, int64 *line_len);
+static int scanSource(const char *src);
 static void InitHashTable(void);
 static uint32 line_hash_fn(const void *key, Size keysize);
 static int line_match_fn(const void *key1, const void *key2, Size keysize);
 static uint32 callGraph_hash_fn(const void *key, Size keysize);
 static int callGraph_match_fn(const void *key1, const void *key2, Size keysize);
-static lineEntry *entry_alloc(lineHashKey *key, int64 line_offset,
-							  int64 line_len);
+static lineEntry *entry_alloc(lineHashKey *key);
 static void callGraph_collect(uint64 us_elapsed, uint64 us_self,
 							  uint64 us_children);
 static void profiler_enabled_assign(bool newval, void *extra);
@@ -310,19 +303,10 @@ profiler_init(PLpgSQL_execstate *estate, PLpgSQL_function *func )
 	/* Allocate enough space to hold and offset for each line of source code */
 	procSrc = findSource( func->fn_oid, &procTuple, &funcName );
 
-	profilerInfo->line_count = scanSource(procSrc, NULL, NULL);
-	profilerInfo->line_offset = palloc(profilerInfo->line_count *
-									   sizeof(int64));
-	profilerInfo->line_len = palloc(profilerInfo->line_count *
-									   sizeof(int64));
+	profilerInfo->line_count = scanSource(procSrc);
 	profilerInfo->stmtStats = palloc0((profilerInfo->line_count + 1) *
 									  sizeof(stmt_stats));
 
-	/*
-	 * Now scan through the source code for this function so we know
-	 * where each line begins
-	 */
-	scanSource(procSrc, profilerInfo->line_offset, profilerInfo->line_len);
 	ReleaseSysCache(procTuple);
 }
 
@@ -427,8 +411,7 @@ profiler_func_end(PLpgSQL_execstate *estate, PLpgSQL_function *func)
 
 		if (!entry)
 		{
-			entry = entry_alloc(&key, profilerInfo->line_offset[lineNo],
-								profilerInfo->line_len[lineNo]);
+			entry = entry_alloc(&key);
 			if (!entry)
 			{
 				elog(ERROR, "Unable to allocate more space for the profiler. ");
@@ -499,7 +482,7 @@ profiler_func_end(PLpgSQL_execstate *estate, PLpgSQL_function *func)
 
 	if (!entry)
 	{
-		entry = entry_alloc(&key, 0, 0);
+		entry = entry_alloc(&key);
 		if (!entry)
 		{
 			elog(ERROR, "Unable to allocate more space for the profiler. ");
@@ -644,31 +627,19 @@ findSource(Oid oid, HeapTuple *tup, char **funcName)
  * scanSource()
  *
  *	This function scans through the source code for a given function
- *	and counts the number of lines of code present in the string.  If
- *	the caller provides an array of integers (dst != NULL), the offset
- *	of each line of code is stored in that array.
+ *	and counts the number of lines of code present in the string.
  * -------------------------------------------------------------------
  */
 static int
-scanSource(const char *src, int64 *dst_off, int64 *dst_len)
+scanSource(const char *src)
 {
-	int			line_count = 0;
+	int			line_count = 1;
 	const char *cp = src;
-	const char *nl;
 
-	while(*cp)
+	while(cp != NULL)
 	{
-		if ((nl = strchr(cp, '\n')) == NULL)
-			nl = cp + strlen(cp);
-		/* cp points to start of line, nl points to end of line */
-		if (dst_off != NULL)
-			dst_off[line_count] = cp - src;
-		if (dst_len != NULL)
-			dst_len[line_count] = nl - cp;
 		line_count++;
-		cp = nl;
-		if (*cp)
-			cp++;
+		cp = strchr(cp, '\n');
 	}
 
 	return line_count;
@@ -789,7 +760,7 @@ callGraph_collect(uint64 us_elapsed, uint64 us_self, uint64 us_children)
 }
 
 static lineEntry *
-entry_alloc(lineHashKey *key, int64 line_offset, int64 line_len)
+entry_alloc(lineHashKey *key)
 {
 	lineEntry	   *entry;
 	bool			found;
@@ -801,8 +772,6 @@ entry_alloc(lineHashKey *key, int64 line_offset, int64 line_len)
 	{
 		/* New entry, initialize it */
 		memset(&entry->counters, 0, sizeof(Counters));
-		entry->line_offset = line_offset;
-		entry->line_len = line_len;
 		entry->counters.isnew = true;
 	}
 
@@ -868,102 +837,6 @@ get_extension_schema(Oid ext_oid)
 /**********************************************************************
  * SQL callable functions
  **********************************************************************/
-
-/* -------------------------------------------------------------------
- * pl_profiler_get_source(func oid, lineno int8)
- *
- *	Returns one line of PL source code.
- * -------------------------------------------------------------------
- */
-Datum
-pl_profiler_get_source(PG_FUNCTION_ARGS)
-{
-	Oid				func_oid = PG_GETARG_OID(0);
-	int64			func_line = PG_GETARG_INT64(1);
-	HeapTuple		procTuple;
-	char		   *procSrc;
-	lineHashKey		key;
-	lineEntry	   *entry;
-	// bool			found;
-	char		   *resbuf;
-	text		   *result;
-	char		   *cp;
-
-	if (line_stats == NULL)
-		InitHashTable();
-
-	/* Get the function source text from the system cache. */
-	procSrc = findSource(func_oid, &procTuple, NULL);
-	if (!HeapTupleIsValid(procTuple))
-		PG_RETURN_NULL();
-	if (procSrc == NULL)
-	{
-		ReleaseSysCache(procTuple);
-		elog(NOTICE, "no procSrc");
-		PG_RETURN_NULL();
-	}
-
-	/* Try to lookup the function entry in the hash table. */
-	key.func_oid = func_oid;
-	key.line_number = (int)func_line;
-
-	entry = (lineEntry *)hash_search(line_stats, &key, HASH_FIND, NULL);
-
-	/*
-	 * If we don't find the entry, we build the entries like we
-	 * would do at runtime for collecting stats. We do this so
-	 * we don't have to scan the source for every single line.
-	 */
-	if (!entry)
-	{
-		int		num_lines;
-		int		line_no;
-		int64  *line_offset;
-		int64  *line_len;
-		bool	found;
-
-		num_lines = scanSource(procSrc, NULL, NULL);
-		line_offset = palloc(num_lines * sizeof(int64));
-		line_len = palloc(num_lines * sizeof(int64));
-
-		scanSource(procSrc, line_offset, line_len);
-		for (line_no = 0; line_no < num_lines; line_no++)
-		{
-			key.line_number = line_no + 1;
-			entry_alloc(&key, line_offset[line_no], line_len[line_no]);
-		}
-
-		key.line_number = func_line;
-		entry = (lineEntry *)hash_search(line_stats, &key, HASH_ENTER, &found);
-
-		if (!found)
-		{
-			memcpy(&(entry->key), &graph_stack, sizeof(entry->key));
-			entry->counters.exec_count = 0;
-			entry->counters.total_time = 0;
-			entry->counters.time_longest = 0;
-		}
-	}
-
-	/* Make sure that the function source text is long enough. */
-	if (entry->line_offset > strlen(procSrc))
-	{
-		ReleaseSysCache(procTuple);
-		PG_RETURN_NULL();
-	}
-
-	/* Copy this one line out of the procSrc. */
-	cp = procSrc + entry->line_offset;
-	resbuf = palloc(entry->line_len + 1);
-	memcpy(resbuf, cp, entry->line_len);
-	resbuf[entry->line_len] = '\0';
-	ReleaseSysCache(procTuple);
-
-	/* Return a TEXT of that. */
-	result = cstring_to_text(resbuf);
-	pfree(resbuf);
-	PG_RETURN_TEXT_P(result);
-}
 
 /* -------------------------------------------------------------------
  * pl_profiler_get_stack(stack oid[])
