@@ -25,6 +25,9 @@ def main():
     if sys.argv[1] == 'report':
         return plprofiler_report.report(sys.argv[2:])
 
+    sys.stderr.write("ERROR: unknown command '%s'\n" %(sys.argv[1]))
+    return 2
+
 def usage():
     print """
 usage: plprofiler COMMAND [OPTIONS]
