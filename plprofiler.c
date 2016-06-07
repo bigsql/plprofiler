@@ -347,7 +347,7 @@ profiler_func_beg(PLpgSQL_execstate *estate, PLpgSQL_function *func)
 		 * This only happens when a transaction aborts and the call stack
 		 * is not properly unwound down to zero depth. Start from scratch.
 		 */
-		memset(&graph_stack, 0, sizeof(graph_stack));
+		MemSet(&graph_stack, 0, sizeof(graph_stack));
 		graph_stack_pt = 0;
 		elog(DEBUG1, "stale call stack reset");
 	}
@@ -640,6 +640,8 @@ scanSource(const char *src)
 	{
 		line_count++;
 		cp = strchr(cp, '\n');
+		if (cp)
+			cp++;
 	}
 
 	return line_count;
@@ -771,7 +773,7 @@ entry_alloc(lineHashKey *key)
 	if (!found)
 	{
 		/* New entry, initialize it */
-		memset(&entry->counters, 0, sizeof(Counters));
+		MemSet(&entry->counters, 0, sizeof(Counters));
 		entry->counters.isnew = true;
 	}
 
@@ -853,9 +855,7 @@ pl_profiler_get_stack(PG_FUNCTION_ARGS)
 	int				nelems;
 	int				i;
 	Datum		   *funcdefs;
-	char			funcdef_buf[8192];
-	Datum			funcargs;
-	char		   *funcargs_s;
+	char			funcdef_buf[100 + NAMEDATALEN * 2];
 
 	/* Take the array apart */
 	deconstruct_array(stack_in, OIDOID,
@@ -880,19 +880,15 @@ pl_profiler_get_stack(PG_FUNCTION_ARGS)
 			nspname = get_namespace_name(get_func_namespace(DatumGetObjectId(stack_oid[i])));
 			if (nspname == NULL)
 				nspname = pstrdup("<unknown>");
-			funcargs = DirectFunctionCall1(pg_get_function_arguments,
-										   stack_oid[i]);
-			funcargs_s = DatumGetPointer(DirectFunctionCall1(textout, funcargs));
 		}
 		else
 		{
 			nspname = pstrdup("<unknown>");
 			funcname = pstrdup("<unknown>");
-			funcargs_s = "<unknown>";
 		}
 
 		snprintf(funcdef_buf, sizeof(funcdef_buf),
-				 "%s.%s(%s) oid=%d", nspname, funcname, funcargs_s,
+				 "%s.%s() oid=%d", nspname, funcname,
 				 DatumGetObjectId(stack_oid[i]));
 
 		pfree(nspname);
@@ -985,8 +981,8 @@ pl_profiler_linestats(PG_FUNCTION_ARGS)
 			}
 
 			/* Include this entry in the result. */
-			memset(values, 0, sizeof(values));
-			memset(nulls, 0, sizeof(nulls));
+			MemSet(values, 0, sizeof(values));
+			MemSet(nulls, 0, sizeof(nulls));
 
 			values[i++] = ObjectIdGetDatum(entry->key.func_oid);
 			values[i++] = Int64GetDatumFast(entry->key.line_number);
@@ -1071,8 +1067,8 @@ pl_profiler_callgraph(PG_FUNCTION_ARGS)
 			if (filter_zero && entry->callCount == 0)
 				continue;
 
-			memset(values, 0, sizeof(values));
-			memset(nulls, 0, sizeof(nulls));
+			MemSet(values, 0, sizeof(values));
+			MemSet(nulls, 0, sizeof(nulls));
 
 			for (i = 0; i < PL_MAX_STACK_DEPTH && entry->key.stack[i] != InvalidOid; i++)
 				funcdefs[i] = ObjectIdGetDatum(entry->key.stack[i]);
@@ -1194,7 +1190,7 @@ pl_profiler_save_stats(PG_FUNCTION_ARGS)
 
 		hash_seq_init(&hash_seq, line_stats);
 		while ((lineEnt = hash_seq_search(&hash_seq)) != NULL)
-			memset(&(lineEnt->counters), 0, sizeof(Counters));
+			MemSet(&(lineEnt->counters), 0, sizeof(Counters));
 
 		result += SPI_processed;
 	}
