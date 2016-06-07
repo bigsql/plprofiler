@@ -131,7 +131,7 @@ def save_data(argv):
                          l_total_time, l_longest_time)
                     SELECT currval('pl_profiler_saved_s_id_seq') as s_id,
                            L.func_oid, L.line_number,
-                           coalesce(S.source, ''),
+                           coalesce(S.source, '-- SOURCE NOT FOUND'),
                            sum(L.exec_count), sum(L.total_time),
                            max(L.longest_time)
                     FROM pl_profiler_linestats_data L
@@ -139,7 +139,7 @@ def save_data(argv):
                         ON S.func_oid = L.func_oid
                         AND S.line_number = L.line_number
                     GROUP BY s_id, L.func_oid, L.line_number, S.source
-                    ORDER BY s_id, L.func_oid, L.line_number, S.source""")
+                    ORDER BY s_id, L.func_oid, L.line_number""")
     if cur.rowcount == 0:
         sys.stderr.write("ERROR: There is no plprofiler data to save\n")
         sys.stderr.write("HINT: Is the profiler enabled and save_interval configured?\n")
