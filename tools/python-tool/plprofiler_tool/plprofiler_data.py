@@ -105,22 +105,41 @@ def save_data(argv):
         sys.stderr.write(str(err) + '\n')
         db.rollback()
         return 1
-    cur.execute("""INSERT INTO pl_profiler_saved_linestats
-                        (l_s_id, l_funcoid, l_schema, l_funcname, l_funcargs,
-                         l_line_number, l_source, l_exec_count,
-                         l_total_time, l_longest_time)
+
+    cur.execute("""INSERT INTO pl_profiler_saved_functions
+                        (f_s_id, f_funcoid, f_schema, f_funcname,
+                         f_funcresult, f_funcargs)
                     SELECT currval('pl_profiler_saved_s_id_seq') as s_id,
                            P.oid, N.nspname, P.proname,
-                           pg_catalog.pg_get_function_arguments(P.oid) as func_args,
-                           line_number,
-                           pl_profiler_get_source(P.oid, L.line_number),
-                           sum(exec_count), sum(total_time),
-                           max(longest_time)
+                           pg_catalog.pg_get_function_result(P.oid) as func_result,
+                           pg_catalog.pg_get_function_arguments(P.oid) as func_args
                     FROM pl_profiler_linestats_data L
                     JOIN pg_catalog.pg_proc P on P.oid = L.func_oid
                     JOIN pg_catalog.pg_namespace N on N.oid = P.pronamespace
-                    GROUP BY s_id, p.oid, nspname, proname, line_number
-                    ORDER BY s_id, p.oid, nspname, proname, line_number;""")
+                    GROUP BY s_id, p.oid, nspname, proname
+                    ORDER BY s_id, p.oid, nspname, proname""")
+    if cur.rowcount == 0:
+        sys.stderr.write("ERROR: There is no plprofiler data to save\n")
+        sys.stderr.write("HINT: Is the profiler enabled and save_interval configured?\n")
+        db.rollback()
+        return 1
+    print cur.rowcount, "rows inserted into pl_profiler_saved_functions"
+
+    cur.execute("""INSERT INTO pl_profiler_saved_linestats
+                        (l_s_id, l_funcoid,
+                         l_line_number, l_source, l_exec_count,
+                         l_total_time, l_longest_time)
+                    SELECT currval('pl_profiler_saved_s_id_seq') as s_id,
+                           L.func_oid, L.line_number,
+                           coalesce(S.source, ''),
+                           sum(L.exec_count), sum(L.total_time),
+                           max(L.longest_time)
+                    FROM pl_profiler_linestats_data L
+                    LEFT JOIN pl_profiler_all_source S
+                        ON S.func_oid = L.func_oid
+                        AND S.line_number = L.line_number
+                    GROUP BY s_id, L.func_oid, L.line_number, S.source
+                    ORDER BY s_id, L.func_oid, L.line_number, S.source""")
     if cur.rowcount == 0:
         sys.stderr.write("ERROR: There is no plprofiler data to save\n")
         sys.stderr.write("HINT: Is the profiler enabled and save_interval configured?\n")
@@ -128,8 +147,8 @@ def save_data(argv):
         return 1
     print cur.rowcount, "rows inserted into pl_profiler_saved_linestats"
 
-    cur.execute("""DELETE FROM pl_profiler_linestats_data""")
-    print cur.rowcount, "rows deleted from pl_profiler_linestats_data"
+    # cur.execute("""DELETE FROM pl_profiler_linestats_data""")
+    # print cur.rowcount, "rows deleted from pl_profiler_linestats_data"
 
     cur.execute("""INSERT INTO pl_profiler_saved_callgraph
                         (c_s_id, c_stack, c_call_count, c_us_total,
@@ -143,8 +162,8 @@ def save_data(argv):
                     ORDER BY s_id, stack;""")
     print cur.rowcount, "rows inserted into pl_profiler_saved_callgraph"
 
-    cur.execute("""DELETE FROM pl_profiler_callgraph_data""")
-    print cur.rowcount, "rows deleted from pl_profiler_callgraph_data"
+    # cur.execute("""DELETE FROM pl_profiler_callgraph_data""")
+    # print cur.rowcount, "rows deleted from pl_profiler_callgraph_data"
 
     db.commit()
     cur.close()

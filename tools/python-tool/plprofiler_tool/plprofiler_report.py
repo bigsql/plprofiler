@@ -109,13 +109,15 @@ def report(argv):
 
 def generate_function_output(db, opt_name, config, func_oid):
     cur = db.cursor()
-    cur.execute("""SELECT l_funcoid, l_funcname, l_funcargs,
+    cur.execute("""SELECT l_funcoid, f_funcname, f_funcresult, f_funcargs,
                     sum(l_total_time) as total_time
                     FROM pl_profiler_saved S
-                    JOIN pl_profiler_saved_linestats L ON L.l_s_id = S.s_id
+                    JOIN pl_profiler_saved_linestats L ON l_s_id = s_id
+                    JOIN pl_profiler_saved_functions F ON f_funcoid = l_funcoid
                     WHERE S.s_name = %s
                       AND L.l_funcoid = %s
-                    GROUP BY 1, 2, 3""", (opt_name, func_oid, ))
+                    GROUP BY l_funcoid, f_funcname, f_funcresult, f_funcargs""",
+                (opt_name, func_oid, ))
     row = cur.fetchone()
     if row is None:
         sys.stderr.write("function with Oid %d not found\n" %func_oid)
@@ -124,13 +126,19 @@ def generate_function_output(db, opt_name, config, func_oid):
     out("""<h3>Function {func_name}() oid={oid} (<a id="toggle_{oid}"
             href="javascript:toggle_div('toggle_{oid}', 'div_{oid}')">show</a>)</h3>""".format(oid = func_oid,
                func_name = row[1]))
-    out("""<p>total_time = {time:,d} &micro;s</p>""".format(time = int(row[3])))
+    out("""<p>total_time = {time:,d} &micro;s</p>""".format(time = int(row[4])))
     out("""<table border="0" cellpadding="0" cellspacing="0">""")
     out("""  <tr>""")
     out("""    <td valign="top"><b><code>{func_name}&nbsp;</code></b></td>""".format(
                  func_name = row[1]))
     out("""    <td><b><code>({func_args})</code></b></td>""".format(
-                 func_args = row[2].replace(', ', ',<br/>&nbsp;')))
+                 func_args = row[3].replace(', ', ',<br/>&nbsp;')))
+    out("""  </tr>""")
+    out("""  <tr>""")
+    out("""    <td colspan="2">""")
+    out("""      <b><code>&nbsp;&nbsp;&nbsp;&nbsp;RETURNS&nbsp;{func_result}</code></b>""".format(
+                func_result = row[2].replace(' ', '&nbsp;')))
+    out("""    </td>""")
     out("""  </tr>""")
     out("""</table>""")
                 
