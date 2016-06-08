@@ -22,6 +22,9 @@
 #if PG_VERSION_NUM >= 90300
 #include "access/htup_details.h"
 #endif
+#if PG_VERSION_NUM < 90400
+#include "access/transam.h"
+#endif
 
 #include "funcapi.h"
 #include "mb/pg_wchar.h"
@@ -34,6 +37,7 @@
 #include "utils/memutils.h"
 #include "utils/syscache.h"
 #include "utils/lsyscache.h"
+#include "utils/tqual.h"
 #include "catalog/pg_proc.h"
 #include "catalog/pg_type.h"
 #include "catalog/pg_extension.h"
@@ -819,7 +823,7 @@ get_extension_schema(Oid ext_oid)
 				ObjectIdGetDatum(ext_oid));
 
 	scandesc = systable_beginscan(rel, ExtensionOidIndexId, true,
-								  NULL, 1, entry);
+								  SnapshotNow, 1, entry);
 
 	tuple = systable_getnext(scandesc);
 
