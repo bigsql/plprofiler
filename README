@@ -9,7 +9,7 @@ plprofiler strives to support as many community-supported major versions of
 Postgres as reasonable. Currently, the following versions of PostgreSQL are
 supported:
 
-9.2 - 9.5
+9.3 - 9.5
 
 Usage
 =================================================================================
