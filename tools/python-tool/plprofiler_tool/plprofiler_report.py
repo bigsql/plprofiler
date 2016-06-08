@@ -81,11 +81,12 @@ def report(argv):
 
     if len(args) == 0:
         out("<h2>Top %d functions (by total_time)</h2>" %(opt_top))
-        cur.execute("""SELECT l_funcoid, sum(l_total_time) as total_time
+        cur.execute("""SELECT l_funcoid,
+                              coalesce(l_total_time, 0) as total_time
                         FROM pl_profiler_saved S
-                        JOIN pl_profiler_saved_linestats L ON L.l_s_id = S.s_id
-                        WHERE S.s_name = %s
-                        GROUP BY l_funcoid
+                        LEFT JOIN pl_profiler_saved_linestats L
+                            ON L.l_s_id = S.s_id
+                        WHERE S.s_name = %s AND L.l_line_number = 0
                         ORDER BY total_time DESC
                         LIMIT %s""", (opt_name, opt_top, ))
         func_oids = []
@@ -110,13 +111,13 @@ def report(argv):
 def generate_function_output(db, opt_name, config, func_oid):
     cur = db.cursor()
     cur.execute("""SELECT l_funcoid, f_funcname, f_funcresult, f_funcargs,
-                    sum(l_total_time) as total_time
+                    coalesce(l_total_time, 0) as total_time
                     FROM pl_profiler_saved S
-                    JOIN pl_profiler_saved_linestats L ON l_s_id = s_id
+                    LEFT JOIN pl_profiler_saved_linestats L ON l_s_id = s_id
                     JOIN pl_profiler_saved_functions F ON f_funcoid = l_funcoid
                     WHERE S.s_name = %s
                       AND L.l_funcoid = %s
-                    GROUP BY l_funcoid, f_funcname, f_funcresult, f_funcargs""",
+                      AND L.l_line_number = 0""",
                 (opt_name, func_oid, ))
     row = cur.fetchone()
     if row is None:
