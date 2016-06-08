@@ -24,6 +24,7 @@
 #endif
 #if PG_VERSION_NUM < 90400
 #include "access/transam.h"
+#include "utils/tqual.h"
 #endif
 
 #include "funcapi.h"
@@ -37,7 +38,6 @@
 #include "utils/memutils.h"
 #include "utils/syscache.h"
 #include "utils/lsyscache.h"
-#include "utils/tqual.h"
 #include "catalog/pg_proc.h"
 #include "catalog/pg_type.h"
 #include "catalog/pg_extension.h"
@@ -822,8 +822,13 @@ get_extension_schema(Oid ext_oid)
 				BTEqualStrategyNumber, F_OIDEQ,
 				ObjectIdGetDatum(ext_oid));
 
+#if PG_VERSION_NUM < 90400
 	scandesc = systable_beginscan(rel, ExtensionOidIndexId, true,
 								  SnapshotNow, 1, entry);
+#else
+	scandesc = systable_beginscan(rel, ExtensionOidIndexId, true,
+								  NULL, 1, entry);
+#endif
 
 	tuple = systable_getnext(scandesc);
 
