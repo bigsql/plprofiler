@@ -170,11 +170,11 @@ def generate_function_output(db, opt_name, config, func_oid):
         else:
             src = cgi.escape(row[1].expandtabs(int(config['tabstop']))).replace(" ", "&nbsp;")
         out("""  <tr>""")
-        out("""    <td align="right">{val}</td>""".format(val = row[0]))
+        out("""    <td align="right"><code>{val}</code></td>""".format(val = row[0]))
         out("""    <td align="left"><code>{src}</code></td>""".format(src = src))
-        out("""    <td class="bar" align="right">{val}</td>""".format(val = row[2]))
+        out("""    <td align="right">{val}</td>""".format(val = row[2]))
         out("""    <td class="bar" align="right">{val}</td>""".format(val = row[3]))
-        out("""    <td class="bar" align="right">{val}</td>""".format(val = row[4]))
+        out("""    <td align="right">{val}</td>""".format(val = row[4]))
         out("""  </tr>""")
 
     out("</table>")
@@ -259,20 +259,25 @@ HTML_SCRIPT = """
                 var vals = rws[j].getElementsByTagName("td");
 
                 var val = parseFloat(vals[2].innerHTML)
-                var pct = val / exec_max * 100;
+                // var pct = val / exec_max * 100;
                 // vals[2].style.backgroundSize = pct + "% 100%";
-                vals[2].style.backgroundSize = "0% 100%";
-                vals[2].innerHTML = val.toLocaleString();
+                // vals[2].style.backgroundSize = "0% 100%";
+                vals[2].innerHTML = "<code>" + val.toLocaleString() + "</code>";
 
                 val = parseFloat(vals[3].innerHTML)
                 pct = val / total_max * 100;
+                pct_str = "(" + pct.toFixed(2) + "%)"
+                var need_spc = 10 - pct_str.length;
+                for (var k = 0; k < need_spc; k++) {
+                    pct_str = "&nbsp;" + pct_str;
+                }
                 vals[3].style.backgroundSize = pct + "% 100%";
-                vals[3].innerHTML = val.toLocaleString() + "&nbsp;&micro;s";
+                vals[3].innerHTML = "<code>" + val.toLocaleString() + "&nbsp;&micro;s" + pct_str + "</code>";
 
                 val = parseFloat(vals[4].innerHTML)
-                pct = val / longest_max * 100;
-                vals[4].style.backgroundSize = pct + "% 100%";
-                vals[4].innerHTML = val.toLocaleString() + "&nbsp;&micro;s";
+                // pct = val / longest_max * 100;
+                // vals[4].style.backgroundSize = pct + "% 100%";
+                vals[4].innerHTML = "<code>" + val.toLocaleString() + "&nbsp;&micro;s" + "</code>";
             }
         }
     }
