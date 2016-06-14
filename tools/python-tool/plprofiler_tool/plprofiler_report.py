@@ -150,10 +150,10 @@ def generate_function_output(db, opt_name, config, func_oid):
     out("""<table class="linestats" border="1" cellpadding="0" cellspacing="0" width="%s">""" %(config['table_width'], ))
     out("""  <tr>""")
     out("""    <th width="10%">Line</th>""")
-    out("""    <th width="60%">Source Code</th>""")
     out("""    <th width="10%">exec_count</th>""")
     out("""    <th width="10%">total_time</th>""")
     out("""    <th width="10%">longest_time</th>""")
+    out("""    <th width="60%">Source Code</th>""")
     out("""  </tr>""")
 
     cur.execute("""SELECT l_line_number, l_source, l_exec_count,
@@ -171,10 +171,10 @@ def generate_function_output(db, opt_name, config, func_oid):
             src = cgi.escape(row[1].expandtabs(int(config['tabstop']))).replace(" ", "&nbsp;")
         out("""  <tr>""")
         out("""    <td align="right"><code>{val}</code></td>""".format(val = row[0]))
-        out("""    <td align="left"><code>{src}</code></td>""".format(src = src))
         out("""    <td align="right">{val}</td>""".format(val = row[2]))
         out("""    <td class="bar" align="right">{val}</td>""".format(val = row[3]))
         out("""    <td align="right">{val}</td>""".format(val = row[4]))
+        out("""    <td align="left"><code>{src}</code></td>""".format(src = src))
         out("""  </tr>""")
 
     out("</table>")
@@ -244,9 +244,9 @@ HTML_SCRIPT = """
             // Get the function level totals of the counters from the
             // second row (the pseudo line-0 row).
             vals = rws[1].getElementsByTagName("td");
-            var exec_max = parseFloat(vals[2].innerHTML)
-            var total_max = parseFloat(vals[3].innerHTML)
-            var longest_max = parseFloat(vals[4].innerHTML)
+            var exec_max = parseFloat(vals[1].innerHTML)
+            var total_max = parseFloat(vals[2].innerHTML)
+            var longest_max = parseFloat(vals[3].innerHTML)
 
             // Guard against division by zero errors.
             if (exec_max == 0) exec_max = 1;
@@ -258,26 +258,26 @@ HTML_SCRIPT = """
             for (var j = 1; j < rws.length; j++) {
                 var vals = rws[j].getElementsByTagName("td");
 
-                var val = parseFloat(vals[2].innerHTML)
+                var val = parseFloat(vals[1].innerHTML)
                 // var pct = val / exec_max * 100;
-                // vals[2].style.backgroundSize = pct + "% 100%";
-                // vals[2].style.backgroundSize = "0% 100%";
-                vals[2].innerHTML = "<code>" + val.toLocaleString() + "</code>";
+                // vals[1].style.backgroundSize = pct + "% 100%";
+                // vals[1].style.backgroundSize = "0% 100%";
+                vals[1].innerHTML = "<code>" + val.toLocaleString() + "</code>";
 
-                val = parseFloat(vals[3].innerHTML)
+                val = parseFloat(vals[2].innerHTML)
                 pct = val / total_max * 100;
                 pct_str = "(" + pct.toFixed(2) + "%)"
                 var need_spc = 10 - pct_str.length;
                 for (var k = 0; k < need_spc; k++) {
                     pct_str = "&nbsp;" + pct_str;
                 }
-                vals[3].style.backgroundSize = pct + "% 100%";
-                vals[3].innerHTML = "<code>" + val.toLocaleString() + "&nbsp;&micro;s" + pct_str + "</code>";
+                vals[2].style.backgroundSize = pct + "% 100%";
+                vals[2].innerHTML = "<code>" + val.toLocaleString() + "&nbsp;&micro;s" + pct_str + "</code>";
 
-                val = parseFloat(vals[4].innerHTML)
+                val = parseFloat(vals[3].innerHTML)
                 // pct = val / longest_max * 100;
-                // vals[4].style.backgroundSize = pct + "% 100%";
-                vals[4].innerHTML = "<code>" + val.toLocaleString() + "&nbsp;&micro;s" + "</code>";
+                // vals[3].style.backgroundSize = pct + "% 100%";
+                vals[3].innerHTML = "<code>" + val.toLocaleString() + "&nbsp;&micro;s" + "</code>";
             }
         }
     }
