@@ -13,5 +13,17 @@ setup(
         'console_scripts': [
             'plprofiler = plprofiler_tool:main',
         ]
+    },
+    package_data = {
+        'plprofiler_tool': [
+                'lib/FlameGraph/README',
+                'lib/FlameGraph/*.pl',
+                'lib/FlameGraph/*.txt',
+                'lib/FlameGraph/*.svg',
+                'lib/FlameGraph/*.awk',
+                'lib/FlameGraph/demos/*',
+                'lib/FlameGraph/dev/*',
+                'lib/FlameGraph/docs/*',
+            ],
     }
 )

@@ -7,6 +7,7 @@ import psycopg2
 import getopt
 import base64
 import json
+import os
 
 import plprofiler_data
 
@@ -194,8 +195,11 @@ def generate_flamegraph(db, opt_name, config):
     for row in cur:
         data += str(row[0]) + " " + str(row[1]) + "\n"
     cur.close()
-    
-    proc = subprocess.Popen(["/home/wieck/FlameGraph/flamegraph.pl",
+
+    path = os.path.dirname(os.path.abspath(__file__))
+    path = os.path.join(path, 'lib', 'FlameGraph', 'flamegraph.pl', )
+
+    proc = subprocess.Popen([path,
                 "--title=%s" %(config['title'], ),
                 "--width=%s" %(config['svg_width'], ), ],
                 stdin = subprocess.PIPE,
