@@ -133,6 +133,7 @@ static time_t			last_save_time = 0;
 PLpgSQL_plugin		  **plugin_ptr = NULL;
 
 Datum pl_profiler_get_stack(PG_FUNCTION_ARGS);
+Datum pl_profiler_get_import_stack(PG_FUNCTION_ARGS);
 Datum pl_profiler_linestats(PG_FUNCTION_ARGS);
 Datum pl_profiler_callgraph(PG_FUNCTION_ARGS);
 Datum pl_profiler_reset(PG_FUNCTION_ARGS);
@@ -140,6 +141,7 @@ Datum pl_profiler_enable(PG_FUNCTION_ARGS);
 Datum pl_profiler_save_stats(PG_FUNCTION_ARGS);
 
 PG_FUNCTION_INFO_V1(pl_profiler_get_stack);
+PG_FUNCTION_INFO_V1(pl_profiler_get_import_stack);
 PG_FUNCTION_INFO_V1(pl_profiler_linestats);
 PG_FUNCTION_INFO_V1(pl_profiler_callgraph);
 PG_FUNCTION_INFO_V1(pl_profiler_reset);
@@ -912,8 +914,112 @@ pl_profiler_get_stack(PG_FUNCTION_ARGS)
 														  false, 'i')));
 }
 
+/* -------------------------------------------------------------------
+ * pl_profiler_get_import_stack()
+ *
+ *	Turn an array of Oids into the textual representation based
+ *	on the import table.
+ * -------------------------------------------------------------------
+ */
+Datum
+pl_profiler_get_import_stack(PG_FUNCTION_ARGS)
+{
+	ArrayType		   *stack_in = PG_GETARG_ARRAYTYPE_P(0);
+	Datum			   *stack_oid;
+	bool			   *nulls;
+	int					nelems;
+	int					i;
+	Datum			   *funcdefs;
+	char				funcdef_buf[100 + NAMEDATALEN * 2];
+	static SPIPlanPtr	lookup_plan = NULL;
 
+	if (SPI_connect() != SPI_OK_CONNECT)
+		elog(ERROR, "SPI_connect() failed in pl_profiler_save_stats()");
 
+	/*
+	 * If not done yet, figure out which namespace the plprofiler
+	 * extension is installed in.
+	 */
+	if (profiler_namespace == NULL)
+	{
+		MemoryContext	oldcxt;
+
+		/* Figure out our extension installation schema. */
+		oldcxt = MemoryContextSwitchTo(TopMemoryContext);
+		profiler_namespace = get_namespace_name(get_extension_schema(
+							 get_extension_oid("plprofiler", false)));
+		MemoryContextSwitchTo(oldcxt);
+	}
+
+	/*
+	 * Prepare the query plan to lookup the function schema and name
+	 * in pg_profiler_import_functions.
+	 */
+	if (lookup_plan == NULL)
+	{
+		char	query[100 + NAMEDATALEN * 2];
+		Oid		argtypes[1];
+
+		snprintf(query, sizeof(query),
+				 "SELECT func_schema, func_name "
+				 "    FROM pl_profiler_import_functions "
+				 "    WHERE func_oid = $1");
+		argtypes[0] = OIDOID;
+		lookup_plan = SPI_saveplan(SPI_prepare(query, 1, argtypes));
+		if (lookup_plan == NULL)
+		{
+			elog(ERROR, "SPI_prepare() failed");
+		}
+	}
+
+	/* Take the input array apart */
+	deconstruct_array(stack_in, OIDOID,
+					  sizeof(Oid), true, 'i',
+					  &stack_oid, &nulls, &nelems);
+
+	/* Allocate the Datum array for the individual function signatures. */
+	funcdefs = palloc(sizeof(Datum) * nelems);
+
+	/*
+	 * Turn each of the function Oids, that are in the array, into
+	 * a text that is "schema.funcname(funcargs) oid=funcoid".
+	 */
+	for (i = 0; i < nelems; i++)
+	{
+		char	   *funcname;
+		char	   *nspname;
+		Datum		plan_args[1];
+
+		/*
+		 * Run the prepared plan to lookup the function in the
+		 * import table.
+		 */
+		plan_args[0] = stack_oid[i];
+		if (SPI_execp(lookup_plan, plan_args, NULL, 0) != SPI_OK_SELECT)
+			elog(ERROR, "SPI_execp() for import function lookup failed");
+		if (SPI_processed != 1)
+			elog(ERROR, "lookup of import function %u failed",
+				 DatumGetObjectId(stack_oid[i]));
+
+		nspname = SPI_getvalue(SPI_tuptable->vals[0],
+							   SPI_tuptable->tupdesc, 1);
+		funcname = SPI_getvalue(SPI_tuptable->vals[0],
+								SPI_tuptable->tupdesc, 2);
+
+		snprintf(funcdef_buf, sizeof(funcdef_buf),
+				 "%s.%s() oid=%u", nspname, funcname,
+				 DatumGetObjectId(stack_oid[i]));
+
+		funcdefs[i] = PointerGetDatum(cstring_to_text(funcdef_buf));
+	}
+
+	SPI_finish();
+
+	/* Return the texts as a text[]. */
+	PG_RETURN_ARRAYTYPE_P(PointerGetDatum(construct_array(funcdefs, nelems,
+														  TEXTOID, -1,
+														  false, 'i')));
+}
 
 /* -------------------------------------------------------------------
  * pl_profiler_linestats()

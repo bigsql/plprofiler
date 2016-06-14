@@ -35,9 +35,7 @@ function export_plprofiler_data() {
 	export_plprofiler_source
 	export_plprofiler_linestats
 	export_plprofiler_callgraph
-	create_import_functions
 	generate_data_set
-	drop_import_functions
 
 	echo "COMMIT;"
 }
@@ -177,31 +175,6 @@ function export_plprofiler_callgraph() {
 	echo "\\."
 	echo "CREATE INDEX pl_profiler_import_callgraph_idx1"
 	echo "    ON pl_profiler_import_callgraph (stack);"
-	echo ""
-}
-
-function create_import_functions() {
-	echo "-- ----"
-	echo "-- Translate an Oid[] into a text[] with function names"
-	echo "-- ----"
-	echo "CREATE FUNCTION pl_profiler_get_import_stack(oid[])"
-	echo "RETURNS text[]"
-	echo "AS \$\$"
-	echo "    SELECT ARRAY("
-	echo "        SELECT func_schema || '.' || func_name ||"
-	echo "				 '() oid=' || foid::text"
-	echo "        FROM pl_profiler_import_functions F"
-	echo "		  JOIN unnest(\$1) foid ON F.func_oid = foid"
-	echo "    )"
-	echo "\$\$ LANGUAGE sql;"
-	echo ""
-}
-
-function drop_import_functions() {
-	echo "-- ----"
-	echo "-- Drop the import helper function(s)"
-	echo "-- ----"
-	echo "DROP FUNCTION pl_profiler_get_import_stack(oid[]);"
 	echo ""
 }
 

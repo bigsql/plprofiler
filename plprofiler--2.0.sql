@@ -35,6 +35,12 @@ AS 'MODULE_PATHNAME'
 LANGUAGE C;
 GRANT EXECUTE ON FUNCTION pl_profiler_get_stack(oid[]) TO public;
 
+CREATE FUNCTION pl_profiler_get_import_stack(stack oid[])
+RETURNS text[]
+AS 'MODULE_PATHNAME'
+LANGUAGE C;
+GRANT EXECUTE ON FUNCTION pl_profiler_get_stack(oid[]) TO public;
+
 CREATE FUNCTION pl_profiler_reset()
 RETURNS void
 AS 'MODULE_PATHNAME'
