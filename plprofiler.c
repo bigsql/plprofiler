@@ -458,7 +458,7 @@ profiler_func_end(PLpgSQL_execstate *estate, PLpgSQL_function *func)
 		if (graph_stack.stack[graph_stack_pt] == func->fn_oid)
 			graph_stacklevel_found = true;
 		else
-			elog(DEBUG1, "unwinding extra graph stacklevel for %d", func->fn_oid);
+			elog(DEBUG1, "In %u unwinding extra graph stacklevel for %u - stack_pt=%d", func->fn_oid, graph_stack.stack[graph_stack_pt], graph_stack_pt);
 
 		INSTR_TIME_SET_CURRENT(now);
 		INSTR_TIME_SUBTRACT(now, graph_stack_entry[graph_stack_pt]);
@@ -897,7 +897,7 @@ pl_profiler_get_stack(PG_FUNCTION_ARGS)
 		}
 
 		snprintf(funcdef_buf, sizeof(funcdef_buf),
-				 "%s.%s() oid=%d", nspname, funcname,
+				 "%s.%s() oid=%u", nspname, funcname,
 				 DatumGetObjectId(stack_oid[i]));
 
 		pfree(nspname);
