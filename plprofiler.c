@@ -72,6 +72,7 @@ typedef struct
 
 typedef struct
 {
+	Oid				fn_oid;
 	int				line_count;		/* Number of lines in this function */
 	stmt_stats	   *stmtStats;		/* Performance counters for each line */
 } profilerCtx;
@@ -174,6 +175,10 @@ static int line_match_fn(const void *key1, const void *key2, Size keysize);
 static uint32 callGraph_hash_fn(const void *key, Size keysize);
 static int callGraph_match_fn(const void *key1, const void *key2, Size keysize);
 static lineEntry *entry_alloc(lineHashKey *key);
+static void callGraph_push(Oid func_oid);
+static void callGraph_pop_one(Oid func_oid);
+static void callGraph_pop(Oid func_oid);
+static void callGraph_check(Oid func_oid);
 static void callGraph_collect(uint64 us_elapsed, uint64 us_self,
 							  uint64 us_children);
 static void profiler_enabled_assign(bool newval, void *extra);
@@ -309,6 +314,7 @@ profiler_init(PLpgSQL_execstate *estate, PLpgSQL_function *func )
 	/* Allocate enough space to hold and offset for each line of source code */
 	procSrc = findSource( func->fn_oid, &procTuple, &funcName );
 
+	profilerInfo->fn_oid = func->fn_oid;
 	profilerInfo->line_count = scanSource(procSrc);
 	profilerInfo->stmtStats = palloc0((profilerInfo->line_count + 1) *
 									  sizeof(stmt_stats));
@@ -346,31 +352,24 @@ profiler_func_beg(PLpgSQL_execstate *estate, PLpgSQL_function *func)
 	 */
 	current_xid = GetTopTransactionId();
 
-	if (graph_stack_pt > 0 && graph_current_xid != current_xid)
+	if (graph_current_xid != current_xid && graph_stack_pt > 0)
 	{
 		/*
 		 * We have a call stack but it started in another transaction.
 		 * This only happens when a transaction aborts and the call stack
-		 * is not properly unwound down to zero depth. Start from scratch.
+		 * is not properly unwound down to zero depth. Unwind it here.
 		 */
-		MemSet(&graph_stack, 0, sizeof(graph_stack));
-		graph_stack_pt = 0;
-		elog(DEBUG1, "stale call stack reset");
+		elog(DEBUG1, "plprofiler: stale call stack reset");
+		while (graph_stack_pt > 0)
+			callGraph_pop_one(func->fn_oid);
 	}
 	graph_current_xid = current_xid;
 
 	/*
-	 * If we are below the maximum call stack depth, set up another level.
 	 * Push this function Oid onto the stack, remember the entry time and
 	 * set the time spent in children to zero.
 	 */
-	if (graph_stack_pt < PL_MAX_STACK_DEPTH)
-	{
-		graph_stack.stack[graph_stack_pt] = func->fn_oid;
-		INSTR_TIME_SET_CURRENT(graph_stack_entry[graph_stack_pt]);
-		graph_stack_child_time[graph_stack_pt] = 0;
-	}
-	graph_stack_pt++;
+	callGraph_push(func->fn_oid);
 }
 
 /* -------------------------------------------------------------------
@@ -385,10 +384,6 @@ profiler_func_end(PLpgSQL_execstate *estate, PLpgSQL_function *func)
 {
 	profilerCtx	   *profilerInfo;
 	int				lineNo;
-	instr_time		now;
-	uint64			us_elapsed;
-	uint64			us_self;
-	bool			graph_stacklevel_found = false;
 	lineHashKey		key;
 	lineEntry	   *entry;
 
@@ -434,75 +429,11 @@ profiler_func_end(PLpgSQL_execstate *estate, PLpgSQL_function *func)
 		entry = NULL;
 	}
 
-	/* At function exit we collect the call graphs. */
-    if (graph_stack_pt <= 0)
-	{
-		elog(DEBUG1, "pl_callgraph stack underrun");
-		return;
-	}
-
 	/*
-	 * Unwind the call stack. In the case of exceptions it is possible
-	 * that the callback for func_end didn't happen as would be the
-	 * case for
-	 *
-	 *     function_one() calls function_two()
-	 *         function_two() exception happens
-	 *     function_one() catches exception and exits.
-	 *
-	 * In that case the func_end callback for function_one() must unwind
-	 * the stack until it finds itself.
+	 * Pop the call stack. This also does the time accounting
+	 * for call graphs.
 	 */
-	while (graph_stack_pt > 0 && !graph_stacklevel_found)
-	{
-		graph_stack_pt--;
-
-		if (graph_stack.stack[graph_stack_pt] == func->fn_oid)
-			graph_stacklevel_found = true;
-		else
-			elog(DEBUG1, "In %u unwinding extra graph stacklevel for %u - stack_pt=%d", func->fn_oid, graph_stack.stack[graph_stack_pt], graph_stack_pt);
-
-		INSTR_TIME_SET_CURRENT(now);
-		INSTR_TIME_SUBTRACT(now, graph_stack_entry[graph_stack_pt]);
-		us_elapsed = INSTR_TIME_GET_MICROSEC(now);
-		us_self = us_elapsed - graph_stack_child_time[graph_stack_pt];
-
-		if (graph_stack_pt > 0)
-			graph_stack_child_time[graph_stack_pt - 1] += us_elapsed;
-
-		callGraph_collect(us_elapsed, us_self, graph_stack_child_time[graph_stack_pt]);
-
-		graph_stack.stack[graph_stack_pt] = InvalidOid;
-	}
-
-	/*
-	 * We also collect per function global counts in the pseudo line number
-	 * zero. The line stats are cumulative (for example a FOR ... LOOP
-	 * statement has the entire execution time of all statements in its
-	 * block), so this can't be derived from the actual per line data.
-	 */
-	key.func_oid = func->fn_oid;
-	key.line_number = 0;
-
-	entry = (lineEntry *)hash_search(line_stats, &key, HASH_FIND, NULL);
-
-	if (!entry)
-	{
-		entry = entry_alloc(&key);
-		if (!entry)
-		{
-			elog(ERROR, "Unable to allocate more space for the profiler. ");
-			return;
-		}
-	}
-
-	entry->counters.exec_count += 1;
-	entry->counters.total_time += us_elapsed;
-
-	if (us_elapsed > entry->counters.time_longest)
-		entry->counters.time_longest = us_elapsed;
-
-	entry = NULL;
+	callGraph_pop(func->fn_oid);
 
 	/*
 	 * Finally if a plprofiler.save_interval is configured, save and reset
@@ -548,6 +479,9 @@ profiler_stmt_beg(PLpgSQL_execstate *estate, PLpgSQL_stmt *stmt)
 
 	/* Set the start time of the statement */
 	INSTR_TIME_SET_CURRENT(stats->start_time);
+
+	/* Check the call graph stack. */
+	callGraph_check(profilerInfo->fn_oid);
 }
 
 /* -------------------------------------------------------------------
@@ -617,7 +551,7 @@ findSource(Oid oid, HeapTuple *tup, char **funcName)
 	*tup = SearchSysCache(PROCOID, ObjectIdGetDatum(oid), 0, 0, 0);
 
 	if(!HeapTupleIsValid(*tup))
-		elog(ERROR, "cache lookup for function %u failed", oid);
+		elog(ERROR, "plprofiler: cache lookup for function %u failed", oid);
 
 	if (funcName != NULL)
 		*funcName = NameStr(((Form_pg_proc)GETSTRUCT(*tup))->proname);
@@ -739,6 +673,116 @@ callGraph_match_fn(const void *key1, const void *key2, Size keysize)
 		if (stack1->stack[i] != stack2->stack[i])
 			return 1;
 	return 0;
+}
+
+static void
+callGraph_push(Oid func_oid)
+{
+	/*
+	 * We only track function Oids in the call stack up to PL_MAX_STACK_DEPTH.
+	 * Beyond that we just count the current stack depth.
+	 */
+	if (graph_stack_pt < PL_MAX_STACK_DEPTH)
+	{
+		/*
+		 * Push this function Oid onto the stack, remember the entry time and
+		 * set the time spent in children to zero.
+		 */
+		graph_stack.stack[graph_stack_pt] = func_oid;
+		INSTR_TIME_SET_CURRENT(graph_stack_entry[graph_stack_pt]);
+		graph_stack_child_time[graph_stack_pt] = 0;
+	}
+	graph_stack_pt++;
+}
+
+static void
+callGraph_pop_one(Oid func_oid)
+{
+	instr_time		now;
+	uint64			us_elapsed;
+	uint64			us_self;
+	lineHashKey		key;
+	lineEntry	   *entry;
+
+	/* Check for call stack underrun. */
+    if (graph_stack_pt <= 0)
+	{
+		elog(DEBUG1, "plprofiler: call graph stack underrun");
+		return;
+	}
+
+	/* Remove one level from the call stack. */
+	graph_stack_pt--;
+
+	/* Calculate the time spent in this function and record it. */
+	INSTR_TIME_SET_CURRENT(now);
+	INSTR_TIME_SUBTRACT(now, graph_stack_entry[graph_stack_pt]);
+	us_elapsed = INSTR_TIME_GET_MICROSEC(now);
+	us_self = us_elapsed - graph_stack_child_time[graph_stack_pt];
+	callGraph_collect(us_elapsed, us_self,
+					  graph_stack_child_time[graph_stack_pt]);
+
+	/* If we have a caller, add our own time to the time of its children. */
+	if (graph_stack_pt > 0)
+		graph_stack_child_time[graph_stack_pt - 1] += us_elapsed;
+
+	/* Zap the oid from the call stack. */
+	graph_stack.stack[graph_stack_pt] = InvalidOid;
+
+	/*
+	 * We also collect per function global counts in the pseudo line number
+	 * zero. The line stats are cumulative (for example a FOR ... LOOP
+	 * statement has the entire execution time of all statements in its
+	 * block), so this can't be derived from the actual per line data.
+	 */
+	key.func_oid = func_oid;
+	key.line_number = 0;
+
+	entry = (lineEntry *)hash_search(line_stats, &key, HASH_FIND, NULL);
+
+	if (!entry)
+	{
+		entry = entry_alloc(&key);
+		if (!entry)
+		{
+			elog(ERROR, "Unable to allocate more space for the profiler. ");
+			return;
+		}
+	}
+
+	entry->counters.exec_count += 1;
+	entry->counters.total_time += us_elapsed;
+
+	if (us_elapsed > entry->counters.time_longest)
+		entry->counters.time_longest = us_elapsed;
+
+	entry = NULL;
+}
+
+static void
+callGraph_pop(Oid func_oid)
+{
+	callGraph_check(func_oid);
+	callGraph_pop_one(func_oid);
+}
+
+static void
+callGraph_check(Oid func_oid)
+{
+	/*
+	 * Unwind the call stack until our own func_oid appears on the top.
+	 *
+	 * In case of an exception, the pl executor does not call the
+	 * func_end callback, so we record now as the end of the function
+	 * calls, that were left on the stack.
+	 */
+	while (graph_stack_pt > 0
+		   && graph_stack.stack[graph_stack_pt - 1] != func_oid)
+	{
+		elog(DEBUG1, "plprofiler: unwinding excess call graph stack entry for %u in %u",
+			 graph_stack.stack[graph_stack_pt - 1], func_oid);
+		callGraph_pop_one(func_oid);
+	}
 }
 
 static void
