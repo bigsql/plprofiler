@@ -81,21 +81,44 @@ def report(argv):
     out("</center>")
 
     if len(args) == 0:
-        out("<h2>Top %d functions (by total_time)</h2>" %(opt_top))
-        cur.execute("""SELECT l_funcoid,
-                              coalesce(l_total_time, 0) as total_time
+        cur.execute("""SELECT regexp_replace(c_stack[array_upper(c_stack, 1)],
+                              E'.* oid=\\([0-9]*\\)$', E'\\\\1') as func_oid,
+                            sum(c_us_self) as us_self
                         FROM pl_profiler_saved S
-                        LEFT JOIN pl_profiler_saved_linestats L
-                            ON L.l_s_id = S.s_id
-                        WHERE S.s_name = %s AND L.l_line_number = 0
-                        ORDER BY total_time DESC
-                        LIMIT %s""", (opt_name, opt_top, ))
+                        JOIN pl_profiler_saved_callgraph C
+                            ON C.c_s_id = S.s_id
+                        WHERE S.s_name = %s
+                        GROUP BY func_oid
+                        ORDER BY us_self DESC
+                        LIMIT %s""", (opt_name, opt_top + 1, ))
         func_oids = []
         for row in cur:
             func_oids.append(int(row[0]))
+        if len(func_oids) > opt_top:
+            func_oids = func_oids[:-1]
+            hdr = "<h2>Top %d functions (by self_time)</h2>" %(len(func_oids),)
+        else:
+            hdr = "<h2>All %d functions (by self_time)</h2>" %(len(func_oids),)
     else:
-        out("<h2>Requested functions</h2>")
         func_oids = [int(x) for x in args]
+        hdr = "<h2>Requested functions</h2>"
+
+    cur.execute("""SELECT f_funcoid, f_schema, f_funcname
+                    FROM pl_profiler_saved S
+                    JOIN pl_profiler_saved_functions F
+                        ON F.f_s_id = S.s_id
+                    WHERE S.s_name = %s
+                    AND F.f_funcoid IN (SELECT * FROM unnest(%s))
+                    ORDER BY upper(f_schema), f_schema,
+                             upper(f_funcname), f_funcname""", (opt_name,
+                                                                func_oids, ))
+    out("<h2>List of functions detailed below</h2>")
+    out("<ul>")
+    for row in cur:
+        out("""<li><a href="#A%d">%s.%s() oid=%d</a></li>""" %(row[0], row[1],
+                                                              row[2], row[0]))
+    out("</ul>")
+    out(hdr)
 
     for func_oid in func_oids:
         generate_function_output(db, opt_name, config, func_oid)
@@ -125,6 +148,7 @@ def generate_function_output(db, opt_name, config, func_oid):
         sys.stderr.write("function with Oid %d not found\n" %func_oid)
         return
 
+    out("""<a name="A%d" />""" %(func_oid, ))
     out("""<h3>Function {func_name}() oid={oid} (<a id="toggle_{oid}"
             href="javascript:toggle_div('toggle_{oid}', 'div_{oid}')">show</a>)</h3>""".format(oid = func_oid,
                func_name = row[1]))
