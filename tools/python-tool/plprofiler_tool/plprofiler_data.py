@@ -113,7 +113,7 @@ def save_data(argv):
                            P.oid, N.nspname, P.proname,
                            pg_catalog.pg_get_function_result(P.oid) as func_result,
                            pg_catalog.pg_get_function_arguments(P.oid) as func_args
-                    FROM pg_catalog.pg_proc P on P.oid = L.func_oid
+                    FROM pg_catalog.pg_proc P
                     JOIN pg_catalog.pg_namespace N on N.oid = P.pronamespace
                     WHERE P.oid IN (SELECT DISTINCT func_oid
                                         FROM pl_profiler_linestats_data)
