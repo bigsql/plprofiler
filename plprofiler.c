@@ -300,7 +300,24 @@ profiler_init(PLpgSQL_execstate *estate, PLpgSQL_function *func )
 		return;
 
 	if (!profiler_enabled)
+	{
+		/*
+		 * The profiler can be enabled/disabled via changing postgresql.conf
+		 * and reload (SIGHUP). The change becomes visible in backends the
+		 * next time, the TCOP loop is ready for a new client query. This
+		 * allows to enable the profiler for some time, have it save the
+		 * stats in the permanent tables, then turn it off again. At that
+		 * moment, we want to release all profiler resources.
+		 */
+		if (line_stats != NULL)
+		{
+			MemoryContextDelete(profiler_mcxt);
+			profiler_mcxt = NULL;
+			line_stats = NULL;
+			callGraph_stats = NULL;
+		}
 		return;
+	}
 
 	/*
 	 * The PL/pgSQL interpreter provides a void pointer (in each stack frame)
