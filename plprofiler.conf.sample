@@ -1,0 +1,24 @@
+# ----
+# Settings for plprofiler
+# ----
+#shared_preload_libraries = 'plprofiler'	# Add this to be able to use
+											# the .enabled and .enable_pid
+											# options.
+#plprofiler.enabled = false					# Enable/disable the profiler
+											# for all backends.
+#plprofiler.enable_pid = 0					# Enable the profiler for one
+											# specific PID regardless of the
+											# .enabled flag.
+#plprofiler.save_interval = 0				# Interval in seconds when the
+											# profiler will save the stats,
+											# collected in hashtables, into
+											# the permanent _data tables.
+											# The default 0 means don't save.
+#plprofiler.save_linestats_table = 'pl_profiler_linestats_data'
+#plprofiler.save_callgraph_table = 'pl_profiler_callgraph_data'
+											# The "permanent" table names
+											# where pl_profiler_save_stats()
+											# and the automatic, interval
+											# driven saving will append the
+											# stats.
+

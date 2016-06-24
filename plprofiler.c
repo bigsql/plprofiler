@@ -118,8 +118,9 @@ static MemoryContext	profiler_mcxt = NULL;
 static HTAB			   *line_stats = NULL;
 
 static bool				profiler_enabled = false;
+static int				profiler_enable_pid = 0;
 static char			   *profiler_namespace = NULL;
-static int				profiler_save_interval = -1;
+static int				profiler_save_interval = 0;
 static char			   *profiler_save_line_table = NULL;
 static char			   *profiler_save_callgraph_table = NULL;
 
@@ -200,7 +201,7 @@ void
 _PG_init(void)
 {
 	DefineCustomBoolVariable("plprofiler.enabled",
-							"Enable or disable plprofiler by default",
+							"Enable or disable plprofiler globally",
 							NULL,
 							&profiler_enabled,
 							false,
@@ -208,6 +209,19 @@ _PG_init(void)
 							0,
 							NULL,
 							profiler_enabled_assign,
+							NULL);
+
+	DefineCustomIntVariable("plprofiler.enable_pid",
+							"Enable or disable plprofiler for a specific pid",
+							NULL,
+							&profiler_enable_pid,
+							0,
+							0,
+							INT_MAX,
+							PGC_USERSET,
+							0,
+							NULL,
+							NULL,
 							NULL);
 
 	DefineCustomIntVariable("plprofiler.save_interval",
@@ -299,7 +313,7 @@ profiler_init(PLpgSQL_execstate *estate, PLpgSQL_function *func )
 	if (func->fn_oid == InvalidOid)
 		return;
 
-	if (!profiler_enabled)
+	if (!profiler_enabled && MyProcPid != profiler_enable_pid)
 	{
 		/*
 		 * The profiler can be enabled/disabled via changing postgresql.conf
@@ -360,7 +374,7 @@ profiler_func_beg(PLpgSQL_execstate *estate, PLpgSQL_function *func)
 	if (estate->plugin_info == NULL)
 		return;
 
-	if (!profiler_enabled)
+	if (!profiler_enabled && MyProcPid != profiler_enable_pid)
 		return;
 
 	/*
@@ -408,7 +422,7 @@ profiler_func_end(PLpgSQL_execstate *estate, PLpgSQL_function *func)
 	if (estate->plugin_info == NULL)
 		return;
 
-	if (!profiler_enabled)
+	if (!profiler_enabled && MyProcPid != profiler_enable_pid)
 		return;
 
 	if (!line_stats)
@@ -488,7 +502,7 @@ profiler_stmt_beg(PLpgSQL_execstate *estate, PLpgSQL_stmt *stmt)
 	if (estate->plugin_info == NULL)
 		return;
 
-	if (!profiler_enabled)
+	if (!profiler_enabled && MyProcPid != profiler_enable_pid)
 		return;
 
 	profilerInfo = (profilerCtx *)estate->plugin_info;
@@ -524,7 +538,7 @@ profiler_stmt_end(PLpgSQL_execstate *estate, PLpgSQL_stmt *stmt)
 	if (estate->plugin_info == NULL)
 		return;
 
-	if (!profiler_enabled)
+	if (!profiler_enabled && MyProcPid != profiler_enable_pid)
 		return;
 
 	INSTR_TIME_SET_CURRENT(end_time);
