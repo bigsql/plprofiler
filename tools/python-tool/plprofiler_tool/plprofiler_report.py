@@ -134,36 +134,53 @@ def report(argv):
 
 def generate_function_output(db, opt_name, config, func_oid):
     cur = db.cursor()
-    cur.execute("""SELECT l_funcoid, f_funcname, f_funcresult, f_funcargs,
-                    coalesce(l_total_time, 0) as total_time
+    cur.execute("""WITH SELF AS (
+                    SELECT regexp_replace(c_stack[array_upper(c_stack, 1)],
+                              E'.* oid=\\([0-9]*\\)$', E'\\\\1') as func_oid,
+                            sum(c_us_self) as us_self
+                        FROM pl_profiler_saved S
+                        JOIN pl_profiler_saved_callgraph C
+                            ON C.c_s_id = S.s_id
+                        WHERE S.s_name = %s
+                        GROUP BY func_oid)
+                SELECT l_funcoid, f_schema, f_funcname,
+                    f_funcresult, f_funcargs,
+                    coalesce(l_total_time, 0) as total_time,
+                    coalesce(SELF.us_self, 0) as self_time
                     FROM pl_profiler_saved S
                     LEFT JOIN pl_profiler_saved_linestats L ON l_s_id = s_id
                     JOIN pl_profiler_saved_functions F ON f_funcoid = l_funcoid
+                    LEFT JOIN SELF ON SELF.func_oid::bigint = f_funcoid
                     WHERE S.s_name = %s
                       AND L.l_funcoid = %s
                       AND L.l_line_number = 0""",
-                (opt_name, func_oid, ))
+                (opt_name, opt_name, func_oid, ))
     row = cur.fetchone()
     if row is None:
         sys.stderr.write("function with Oid %d not found\n" %func_oid)
         return
 
     out("""<a name="A%d" />""" %(func_oid, ))
-    out("""<h3>Function {func_name}() oid={oid} (<a id="toggle_{oid}"
+    out("""<h3>Function {func_schema}.{func_name}() oid={oid} (<a id="toggle_{oid}"
             href="javascript:toggle_div('toggle_{oid}', 'div_{oid}')">show</a>)</h3>""".format(oid = func_oid,
-               func_name = row[1]))
-    out("""<p>total_time = {time:,d} &micro;s</p>""".format(time = int(row[4])))
+               func_schema = row[1],
+               func_name = row[2]))
+    out("""<p>""")
+    out("""self_time = {time:,d} &micro;s<br/>""".format(time = int(row[6])))
+    out("""total_time = {time:,d} &micro;s""".format(time = int(row[5])))
+    out("""</p>""")
     out("""<table border="0" cellpadding="0" cellspacing="0">""")
     out("""  <tr>""")
-    out("""    <td valign="top"><b><code>{func_name}&nbsp;</code></b></td>""".format(
-                 func_name = row[1]))
+    out("""    <td valign="top"><b><code>{func_schema}.{func_name}&nbsp;</code></b></td>""".format(
+                 func_schema = row[1],
+                 func_name = row[2]))
     out("""    <td><b><code>({func_args})</code></b></td>""".format(
-                 func_args = row[3].replace(', ', ',<br/>&nbsp;')))
+                 func_args = row[4].replace(', ', ',<br/>&nbsp;')))
     out("""  </tr>""")
     out("""  <tr>""")
     out("""    <td colspan="2">""")
     out("""      <b><code>&nbsp;&nbsp;&nbsp;&nbsp;RETURNS&nbsp;{func_result}</code></b>""".format(
-                func_result = row[2].replace(' ', '&nbsp;')))
+                func_result = row[3].replace(' ', '&nbsp;')))
     out("""    </td>""")
     out("""  </tr>""")
     out("""</table>""")
