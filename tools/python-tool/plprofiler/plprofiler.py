@@ -114,6 +114,75 @@ class plprofiler:
         cur.close()
         self.dbconn.commit()
 
+    def save_dataset_from_current(self, opt_name, config, overwrite = False):
+        # ----
+        # Aggregate the existing data found in pl_profiler_linestats_current
+        # and pl_profiler_callgraph_current into a new entry in *_saved.
+        # ----
+        cur = self.dbconn.cursor()
+        cur.execute("""SET search_path TO %s;""", (self.profiler_namespace, ))
+        cur.execute("""SET TRANSACTION ISOLATION LEVEL REPEATABLE READ;""")
+
+        try:
+            if overwrite:
+                cur.execute("""DELETE FROM pl_profiler_saved
+                                WHERE s_name = %s""", (opt_name, ))
+            cur.execute("""INSERT INTO pl_profiler_saved
+                                (s_name, s_options)
+                            VALUES (%s, %s)""",
+                        (opt_name, json.dumps(config)))
+        except psycopg2.IntegrityError as err:
+            self.dbconn.rollback()
+            raise err
+
+        cur.execute("""INSERT INTO pl_profiler_saved_functions
+                            (f_s_id, f_funcoid, f_schema, f_funcname,
+                             f_funcresult, f_funcargs)
+                        SELECT currval('pl_profiler_saved_s_id_seq') as s_id,
+                               P.oid, N.nspname, P.proname,
+                               pg_catalog.pg_get_function_result(P.oid) as func_result,
+                               pg_catalog.pg_get_function_arguments(P.oid) as func_args
+                        FROM pg_catalog.pg_proc P
+                        JOIN pg_catalog.pg_namespace N on N.oid = P.pronamespace
+                        WHERE P.oid IN (SELECT DISTINCT func_oid
+                                            FROM pl_profiler_linestats_current)
+                        GROUP BY s_id, p.oid, nspname, proname
+                        ORDER BY s_id, p.oid, nspname, proname""")
+        if cur.rowcount == 0:
+            self.dbconn.rollback()
+            raise Exception("No function data to save found")
+
+        cur.execute("""INSERT INTO pl_profiler_saved_linestats
+                            (l_s_id, l_funcoid,
+                             l_line_number, l_source, l_exec_count,
+                             l_total_time, l_longest_time)
+                        SELECT currval('pl_profiler_saved_s_id_seq') as s_id,
+                               L.func_oid, L.line_number,
+                               coalesce(L.line, '-- SOURCE NOT FOUND'),
+                               sum(L.exec_count), sum(L.total_time),
+                               max(L.longest_time)
+                        FROM pl_profiler_linestats_current L
+                        GROUP BY s_id, L.func_oid, L.line_number, L.line
+                        ORDER BY s_id, L.func_oid, L.line_number""")
+        if cur.rowcount == 0:
+            self.dbconn.rollback()
+            raise Exception("No plprofiler data to save")
+
+        cur.execute("""INSERT INTO pl_profiler_saved_callgraph
+                            (c_s_id, c_stack, c_call_count, c_us_total,
+                             c_us_children, c_us_self)
+                        SELECT currval('pl_profiler_saved_s_id_seq') as s_id,
+                               stack,
+                               sum(call_count), sum(us_total),
+                               sum(us_children), sum(us_self)
+                        FROM pl_profiler_callgraph_current
+                        GROUP BY s_id, stack
+                        ORDER BY s_id, stack;""")
+
+        cur.execute("""RESET search_path""")
+        cur.close()
+        self.dbconn.commit()
+
     def get_dataset_list(self):
         cur = self.dbconn.cursor()
         cur.execute("""SET search_path TO %s""", (self.profiler_namespace, ))
@@ -167,12 +236,12 @@ class plprofiler:
         cur.execute("""DELETE FROM pl_profiler_saved
                         WHERE s_name = %s""",
                     (opt_name, ))
-        cur.execute("""RESET search_path""")
         if cur.rowcount != 1:
             self.dbconn.rollback()
             raise Exception("Data set with name '" + opt_name +
                              "' does not exists")
         else:
+            cur.execute("""RESET search_path""")
             self.dbconn.commit()
         cur.close()
 
@@ -542,6 +611,7 @@ class plprofiler:
         except Exception as err:
             self.dbconn.autocommit = False
             raise err
+        self.dbconn.rollback()
 
     def report(self, report_data, output_fd):
         report = plprofiler_report()

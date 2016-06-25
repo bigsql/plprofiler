@@ -31,6 +31,9 @@ def main():
     if sys.argv[1] == 'report':
         return report_command(sys.argv[2:])
 
+    if sys.argv[1] == 'run':
+        return run_command(sys.argv[2:])
+
     sys.stderr.write("ERROR: unknown command '%s'\n" %(sys.argv[1]))
     return 2
 
@@ -46,7 +49,7 @@ def save_data_command(argv):
     # Parse command line
     # ----
     try:
-        opts, args = getopt.getopt(argv, "c:d:fn:t:", [
+        opts, args = getopt.getopt(argv, "c:D:fN:T:", [
                 'conninfo=', 'name=', 'title=', 'force',
                 'desc=', 'description=', ])
     except Exception as err:
@@ -56,11 +59,11 @@ def save_data_command(argv):
     for opt, val in opts:
         if opt in ['-c', '--conninfo']:
             opt_conninfo = val
-        elif opt in ['-n', '--name']:
+        elif opt in ['-N', '--name']:
             opt_name = val
-        elif opt in ['-t', '--title']:
+        elif opt in ['-T', '--title']:
             opt_title = val
-        elif opt in ['-d', '--desc', '--description']:
+        elif opt in ['-D', '--desc', '--description']:
             opt_desc = val
         elif opt in ['-f', '--force']:
             opt_force = True
@@ -170,7 +173,7 @@ def edit_data_command(argv):
     # Parse command line
     # ----
     try:
-        opts, args = getopt.getopt(argv, "c:n:", [
+        opts, args = getopt.getopt(argv, "c:N:", [
                 'conninfo=', 'name=', ])
     except Exception as err:
         sys.stderr.write(str(err) + '\n')
@@ -179,7 +182,7 @@ def edit_data_command(argv):
     for opt, val in opts:
         if opt in ['-c', '--conninfo']:
             opt_conninfo = val
-        elif opt in ['-n', '--name']:
+        elif opt in ['-N', '--name']:
             opt_name = val
 
     if opt_name is None:
@@ -226,7 +229,7 @@ def delete_data_command(argv):
     # Parse command line
     # ----
     try:
-        opts, args = getopt.getopt(argv, "c:n:", [
+        opts, args = getopt.getopt(argv, "c:N:", [
                 'conninfo=', 'name=', ])
     except Exception as err:
         sys.stderr.write(str(err) + '\n')
@@ -235,7 +238,7 @@ def delete_data_command(argv):
     for opt, val in opts:
         if opt in ['-c', '--conninfo']:
             opt_conninfo = val
-        elif opt in ['-n', '--name']:
+        elif opt in ['-N', '--name']:
             opt_name = val
 
     if opt_name is None:
@@ -289,7 +292,7 @@ def report_command(argv):
     opt_output = None
 
     try:
-        opts, args = getopt.getopt(argv, "c:n:o:t:", [
+        opts, args = getopt.getopt(argv, "c:N:o:t:", [
                 'conninfo=', 'name=', 'output=', 'top=', ])
     except Exception as err:
         sys.stderr.write(str(err) + '\n')
@@ -298,7 +301,7 @@ def report_command(argv):
     for opt, val in opts:
         if opt in ('-c', '--conninfo', ):
             opt_conninfo = val
-        elif opt in ('-n', '--name', ):
+        elif opt in ('-N', '--name', ):
             opt_name = val
         elif opt in ('-o', '--output', ):
             opt_output = val
@@ -328,6 +331,128 @@ def report_command(argv):
 
     if opt_output is not None:
         output_fd.close()
+
+    return 0
+
+def run_command(argv):
+    opt_conninfo = ''
+    opt_name = None
+    opt_title = None
+    opt_desc = None
+    opt_sql_file = None
+    opt_query = None
+    opt_top = 10
+    opt_output = None
+    opt_save = False
+    opt_force = False
+    need_edit = False
+
+    try:
+        opts, args = getopt.getopt(argv, "c:D:fN:o:q:s:t:T:", [
+                'conninfo=', 'name=', 'title=', 'output=', 'top=',
+                'desc=', 'description=', 'query=', 'sql-file=',
+                'save', 'force', ])
+    except Exception as err:
+        sys.stderr.write(str(err) + '\n')
+        return 2
+
+    for opt, val in opts:
+        if opt in ('-c', '--conninfo', ):
+            opt_conninfo = val
+        elif opt in ('-N', '--name', ):
+            opt_name = val
+        elif opt in ('-T', '--title', ):
+            opt_title = val
+        elif opt in ('-D', '--desc', '--description', ):
+            opt_desc = val
+        elif opt in ('-q', '--query', ):
+            opt_query = val
+        elif opt in ('-s', '--sql-file', ):
+            opt_sql_file = val
+        elif opt in ('-t', '--top', ):
+            opt_top = int(val)
+        elif opt in ('-o', '--output', ):
+            opt_output = val
+        elif opt in ('-s', '--save', ):
+            opt_save = True
+        elif opt in ('-f', '--force', ):
+            opt_force = True
+
+    if opt_name is None:
+        need_edit = True
+        opt_name = 'current'
+
+    if opt_title is None:
+        need_edit = True
+        opt_title = "PL Profiler Report for %s" %(opt_name, )
+
+    if opt_desc is None:
+        need_edit = True
+        opt_desc = ("<h1>PL Profiler Report for %s</h1>\n" +
+                    "<p>\n<!-- description here -->\n</p>") %(opt_name, )
+
+    if opt_sql_file is not None and opt_query is not None:
+        sys.stderr.write("--query and --sql-file are mutually exclusive\n")
+        return 2
+    if opt_sql_file is None and opt_query is None:
+        sys.stderr.write("One of --query or --sql-file must be given\n")
+        return 2
+    if opt_query is None:
+        with open(opt_sql_file, 'r') as fd:
+            opt_query = fd.read()
+
+    if opt_output is None and opt_save is None:
+        sys.stderr.write("One of --output or --save must be given\n")
+        return 2
+
+    try:
+        plp = plprofiler()
+        plp.connect(opt_conninfo)
+    except Exception as err:
+        sys.stderr.write(str(err) + '\n')
+        return 1
+
+    plp.enable()
+    plp.reset_current()
+    plp.execute_sql(opt_query)
+
+    # ----
+    # Create our config.
+    # ----
+    config = {
+        'name':         opt_name,
+        'title':        opt_title,
+        'tabstop':      8,
+        'svg_width':    1200,
+        'table_width':  '80%',
+        'desc':         opt_desc,
+    }
+
+    # ----
+    # If we set defaults for config options, invoke an editor.
+    # ----
+    if need_edit:
+        try:
+            edit_config_info(config)
+        except Exception as err:
+            sys.stderr.write(str(err) + '\n')
+            traceback.print_exc()
+            return 2
+        opt_name = config['name']
+
+    if opt_save:
+        try:
+            plp.save_dataset_from_current(opt_name, config, opt_force)
+        except Exception as err:
+            sys.stderr.write(str(err) + "\n")
+            return 1
+
+    if opt_output is not None:
+        with open(opt_output, 'w') as output_fd:
+            report_data = plp.get_current_report_data(opt_name, opt_top, args)
+            report_data['config'] = config
+            plp.report(report_data, output_fd)
+            output_fd.close()
 
     return 0
 
