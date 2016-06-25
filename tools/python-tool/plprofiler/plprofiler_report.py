@@ -184,7 +184,7 @@ def generate_function_output(db, opt_name, config, func_oid):
     out("""    </td>""")
     out("""  </tr>""")
     out("""</table>""")
-                
+
     out("""<div id="div_{oid}" style="display: none">""".format(
             oid = func_oid))
 
