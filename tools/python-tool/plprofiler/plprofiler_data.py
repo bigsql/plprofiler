@@ -48,10 +48,10 @@ class plprofiler_data:
         cur.execute("""SET search_path TO %s;""", (self.profiler_namespace, ))
         cur.execute("""SET TRANSACTION ISOLATION LEVEL REPEATABLE READ;""")
 
-        if overwrite:
-            cur.execute("""DELETE FROM pl_profiler_saved
-                            WHERE s_name = %s""", (opt_name, ))
         try:
+            if overwrite:
+                cur.execute("""DELETE FROM pl_profiler_saved
+                                WHERE s_name = %s""", (opt_name, ))
             cur.execute("""INSERT INTO pl_profiler_saved
                                 (s_name, s_options)
                             VALUES (%s, %s)""",
@@ -75,7 +75,7 @@ class plprofiler_data:
                         ORDER BY s_id, p.oid, nspname, proname""")
         if cur.rowcount == 0:
             self.dbconn.rollback()
-            raise Exception("no data to save found")
+            raise Exception("No function data to save found")
 
         cur.execute("""INSERT INTO pl_profiler_saved_linestats
                             (l_s_id, l_funcoid,
@@ -94,7 +94,7 @@ class plprofiler_data:
                         ORDER BY s_id, L.func_oid, L.line_number""")
         if cur.rowcount == 0:
             self.dbconn.rollback()
-            raise Exception("ERROR: There is no plprofiler data to save\n")
+            raise Exception("No plprofiler data to save")
 
         cur.execute("""INSERT INTO pl_profiler_saved_callgraph
                             (c_s_id, c_stack, c_call_count, c_us_total,
@@ -107,6 +107,7 @@ class plprofiler_data:
                         GROUP BY s_id, stack
                         ORDER BY s_id, stack;""")
 
+        cur.execute("""RESET search_path""")
         cur.close()
         self.dbconn.commit()
 
@@ -117,6 +118,7 @@ class plprofiler_data:
                         FROM pl_profiler_saved
                         ORDER BY s_name""")
         result = cur.fetchall()
+        cur.execute("""RESET search_path""")
         cur.close()
         self.dbconn.rollback()
         return result
@@ -133,6 +135,7 @@ class plprofiler_data:
         row = cur.fetchone()
         config = json.loads(row[0])
         config['name'] = opt_name
+        cur.execute("""RESET search_path""")
         cur.close()
         self.dbconn.rollback()
 
@@ -146,6 +149,7 @@ class plprofiler_data:
                             s_options = %s
                         WHERE s_name = %s""",
                     (new_name, json.dumps(config), opt_name))
+        cur.execute("""RESET search_path""")
         if cur.rowcount != 1:
             self.dbconn.rollback()
             raise Exception("Data set with name '" + opt_name +
@@ -160,6 +164,7 @@ class plprofiler_data:
         cur.execute("""DELETE FROM pl_profiler_saved
                         WHERE s_name = %s""",
                     (opt_name, ))
+        cur.execute("""RESET search_path""")
         if cur.rowcount != 1:
             self.dbconn.rollback()
             raise Exception("Data set with name '" + opt_name +
