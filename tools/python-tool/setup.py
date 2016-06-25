@@ -8,14 +8,14 @@ setup(
     author_email = 'janw@openscg.com',
     url = 'https://bitbucket.org/openscg/plprofiler/overview',
     license = 'Artistic License',
-    packages = ['plprofiler_tool', ],
+    packages = ['plprofiler', ],
     entry_points = {
         'console_scripts': [
-            'plprofiler = plprofiler_tool:main',
+            'plprofiler = plprofiler:main',
         ]
     },
     package_data = {
-        'plprofiler_tool': [
+        'plprofiler': [
                 'lib/FlameGraph/README',
                 'lib/FlameGraph/*.pl',
                 'lib/FlameGraph/*.txt',
