@@ -1,261 +1,130 @@
 #!/usr/bin/env python
 
-import sys
-import subprocess
-import cgi
-import psycopg2
-import getopt
 import base64
-import json
+import cgi
 import os
+import subprocess
+import sys
 
-import plprofiler_data
+from plprofiler_data import plprofiler_data
 
-__all__ = ['report']
+__all__ = ['plprofiler_report']
 
-def report(argv):
-    opt_conninfo = ''
-    opt_name = None
-    opt_top = 10
-    opt_output = None
+class plprofiler_report:
+    def __init__(self):
+        pass
 
-    global output_fd
+    def generate(self, report_data, outfd):
+        config = report_data['config']
+        self.outfd = outfd
 
-    try:
-        opts, args = getopt.getopt(argv, "c:n:o:t:", [
-                'conninfo=', 'name=', 'output=', 'top=', ])
-    except Exception as err:
-        sys.stderr.write(str(err) + '\n')
-        return 2
+        self.out("<html>")
+        self.out("<head>")
+        self.out("  <title>%s</title>" %(cgi.escape(config['title']), ))
+        self.out(HTML_SCRIPT)
+        self.out(HTML_STYLE)
+        self.out("</head>")
+        self.out("""<body bgcolor="#ffffff" onload="set_stat_bars()">""")
+        self.out(config['desc'])
 
-    for opt, val in opts:
-        if opt in ('-c', '--conninfo', ):
-            opt_conninfo = val
-        elif opt in ('-n', '--name', ):
-            opt_name = val
-        elif opt in ('-o', '--output', ):
-            opt_output = val
-        elif opt in ('-t', '--top', ):
-            opt_top = int(val)
+        self.out("<h2>PL/pgSQL Call Graph</h2>")
+        self.out("<center>")
+        self.out(self.generate_flamegraph(config, report_data['flamedata']))
+        self.out("</center>")
 
-    if opt_name is None:
-        sys.write.stderr("option --name must be given\n")
-        return 2
-
-    if opt_output is None:
-        output_fd = sys.stdout
-    else:
-        output_fd = open(opt_output, 'w')
-
-    db = psycopg2.connect(opt_conninfo)
-    cur = db.cursor()
-    try:
-        profiler_namespace = plprofiler_data.get_profiler_namespace(db);
-    except Exception as err:
-        sys.stderr.write(str(err) + '\n')
-        return 1
-
-    cur.execute("""SET search_path TO %s""", (profiler_namespace, ))
-    cur.execute("""SELECT s_options
-                    FROM pl_profiler_saved
-                    WHERE s_name = %s""", (opt_name, ))
-    row = cur.fetchone()
-    if row is None:
-        print "No saved data with name '" + opt_name + "' found"
-        db.rollback()
-        return 1
-    config = json.loads(row[0])
-
-    out("<html>")
-    out("<head>")
-    out("  <title>%s</title>" %(cgi.escape(config['title']), ))
-    out(HTML_SCRIPT)
-    out(HTML_STYLE)
-    out("</head>")
-    out("""<body bgcolor="#ffffff" onload="set_stat_bars()">""")
-    out(config['desc'])
-
-    out("<h2>PL/pgSQL Call Graph</h2>")
-    out("<center>")
-    out(generate_flamegraph(db, opt_name, config))
-    out("</center>")
-
-    if len(args) == 0:
-        cur.execute("""SELECT regexp_replace(c_stack[array_upper(c_stack, 1)],
-                              E'.* oid=\\([0-9]*\\)$', E'\\\\1') as func_oid,
-                            sum(c_us_self) as us_self
-                        FROM pl_profiler_saved S
-                        JOIN pl_profiler_saved_callgraph C
-                            ON C.c_s_id = S.s_id
-                        WHERE S.s_name = %s
-                        GROUP BY func_oid
-                        ORDER BY us_self DESC
-                        LIMIT %s""", (opt_name, opt_top + 1, ))
-        func_oids = []
-        for row in cur:
-            func_oids.append(int(row[0]))
-        if len(func_oids) > opt_top:
-            func_oids = func_oids[:-1]
-            hdr = "<h2>Top %d functions (by self_time)</h2>" %(len(func_oids),)
+        if not report_data['func_oids_by_user']:
+            if report_data['found_more_funcs']:
+                hdr = "<h2>Top %d functions (by self_time)</h2>" %(len(report_data['func_list']),)
+            else:
+                hdr = "<h2>All %d functions (by self_time)</h2>" %(len(report_data['func_list']),)
         else:
-            hdr = "<h2>All %d functions (by self_time)</h2>" %(len(func_oids),)
-    else:
-        func_oids = [int(x) for x in args]
-        hdr = "<h2>Requested functions</h2>"
+            hdr = "<h2>Requested functions</h2>"
 
-    cur.execute("""SELECT f_funcoid, f_schema, f_funcname
-                    FROM pl_profiler_saved S
-                    JOIN pl_profiler_saved_functions F
-                        ON F.f_s_id = S.s_id
-                    WHERE S.s_name = %s
-                    AND F.f_funcoid IN (SELECT * FROM unnest(%s))
-                    ORDER BY upper(f_schema), f_schema,
-                             upper(f_funcname), f_funcname""", (opt_name,
-                                                                func_oids, ))
-    out("<h2>List of functions detailed below</h2>")
-    out("<ul>")
-    for row in cur:
-        out("""<li><a href="#A%d">%s.%s() oid=%d</a></li>""" %(row[0], row[1],
-                                                              row[2], row[0]))
-    out("</ul>")
-    out(hdr)
+        self.out("<h2>List of functions detailed below</h2>")
+        self.out("<ul>")
+        for func in report_data['func_list']:
+            self.out("""<li><a href="#A{funcoid}">{schema}.{funcname}() oid={funcoid}</a></li>""".format(**func))
+        self.out("</ul>")
+        self.out(hdr)
 
-    for func_oid in func_oids:
-        generate_function_output(db, opt_name, config, func_oid)
+        for func_def in report_data['func_defs']:
+            self.generate_function_output(config, func_def)
 
-    out("</body>")
-    out("</html>")
+        self.out("</body>")
+        self.out("</html>")
 
-    if opt_output is not None:
-        output_fd.close()
+    def generate_function_output(self, config, func_def):
+        self.out("""<a name="A{funcoid}" />""".format(**func_def))
+        self.out("""<h3>Function {schema}.{funcname}() oid={funcoid} (<a id="toggle_{funcoid}"
+                href="javascript:toggle_div('toggle_{funcoid}', 'div_{funcoid}')">show</a>)</h3>""".format(**func_def))
+        self.out("""<p>""")
+        self.out("""self_time = {self_time:,d} &micro;s<br/>""".format(**func_def))
+        self.out("""total_time = {total_time:,d} &micro;s""".format(**func_def))
+        self.out("""</p>""")
+        self.out("""<table border="0" cellpadding="0" cellspacing="0">""")
+        self.out("""  <tr>""")
+        self.out("""    <td valign="top"><b><code>{schema}.{funcname}&nbsp;</code></b></td>""".format(**func_def))
+        self.out("""    <td><b><code>({funcargs})</code></b></td>""".format(
+                     funcargs = func_def['funcargs'].replace(', ', ',<br/>&nbsp;')))
+        self.out("""  </tr>""")
+        self.out("""  <tr>""")
+        self.out("""    <td colspan="2">""")
+        self.out("""      <b><code>&nbsp;&nbsp;&nbsp;&nbsp;RETURNS&nbsp;{funcresult}</code></b>""".format(
+                    funcresult = func_def['funcresult'].replace(' ', '&nbsp;')))
+        self.out("""    </td>""")
+        self.out("""  </tr>""")
+        self.out("""</table>""")
 
-    db.close()
-    return 0
+        self.out("""<div id="div_{funcoid}" style="display: none">""".format(
+                **func_def))
 
-def generate_function_output(db, opt_name, config, func_oid):
-    cur = db.cursor()
-    cur.execute("""WITH SELF AS (
-                    SELECT regexp_replace(c_stack[array_upper(c_stack, 1)],
-                              E'.* oid=\\([0-9]*\\)$', E'\\\\1') as func_oid,
-                            sum(c_us_self) as us_self
-                        FROM pl_profiler_saved S
-                        JOIN pl_profiler_saved_callgraph C
-                            ON C.c_s_id = S.s_id
-                        WHERE S.s_name = %s
-                        GROUP BY func_oid)
-                SELECT l_funcoid, f_schema, f_funcname,
-                    f_funcresult, f_funcargs,
-                    coalesce(l_total_time, 0) as total_time,
-                    coalesce(SELF.us_self, 0) as self_time
-                    FROM pl_profiler_saved S
-                    LEFT JOIN pl_profiler_saved_linestats L ON l_s_id = s_id
-                    JOIN pl_profiler_saved_functions F ON f_funcoid = l_funcoid
-                    LEFT JOIN SELF ON SELF.func_oid::bigint = f_funcoid
-                    WHERE S.s_name = %s
-                      AND L.l_funcoid = %s
-                      AND L.l_line_number = 0""",
-                (opt_name, opt_name, func_oid, ))
-    row = cur.fetchone()
-    if row is None:
-        sys.stderr.write("function with Oid %d not found\n" %func_oid)
-        return
+        self.out("<center>")
+        self.out("""<table class="linestats" border="1" cellpadding="0" cellspacing="0" width="%s">""" %(config['table_width'], ))
+        self.out("""  <tr>""")
+        self.out("""    <th width="10%">Line</th>""")
+        self.out("""    <th width="10%">exec_count</th>""")
+        self.out("""    <th width="10%">total_time</th>""")
+        self.out("""    <th width="10%">longest_time</th>""")
+        self.out("""    <th width="60%">Source Code</th>""")
+        self.out("""  </tr>""")
 
-    out("""<a name="A%d" />""" %(func_oid, ))
-    out("""<h3>Function {func_schema}.{func_name}() oid={oid} (<a id="toggle_{oid}"
-            href="javascript:toggle_div('toggle_{oid}', 'div_{oid}')">show</a>)</h3>""".format(oid = func_oid,
-               func_schema = row[1],
-               func_name = row[2]))
-    out("""<p>""")
-    out("""self_time = {time:,d} &micro;s<br/>""".format(time = int(row[6])))
-    out("""total_time = {time:,d} &micro;s""".format(time = int(row[5])))
-    out("""</p>""")
-    out("""<table border="0" cellpadding="0" cellspacing="0">""")
-    out("""  <tr>""")
-    out("""    <td valign="top"><b><code>{func_schema}.{func_name}&nbsp;</code></b></td>""".format(
-                 func_schema = row[1],
-                 func_name = row[2]))
-    out("""    <td><b><code>({func_args})</code></b></td>""".format(
-                 func_args = row[4].replace(', ', ',<br/>&nbsp;')))
-    out("""  </tr>""")
-    out("""  <tr>""")
-    out("""    <td colspan="2">""")
-    out("""      <b><code>&nbsp;&nbsp;&nbsp;&nbsp;RETURNS&nbsp;{func_result}</code></b>""".format(
-                func_result = row[3].replace(' ', '&nbsp;')))
-    out("""    </td>""")
-    out("""  </tr>""")
-    out("""</table>""")
+        for line in func_def['source']:
+            if line['line_number'] == 0:
+                src = "<b>--&nbsp;Function&nbsp;Totals</b>"
+            else:
+                src = cgi.escape(line['source'].expandtabs(int(config['tabstop']))).replace(" ", "&nbsp;")
+            self.out("""  <tr>""")
+            self.out("""    <td align="right"><code>{val}</code></td>""".format(val = line['line_number']))
+            self.out("""    <td align="right">{val}</td>""".format(val = line['exec_count']))
+            self.out("""    <td class="bar" align="right">{val}</td>""".format(val = line['total_time']))
+            self.out("""    <td align="right">{val}</td>""".format(val = line['longest_time']))
+            self.out("""    <td align="left"><code>{src}</code></td>""".format(src = src))
+            self.out("""  </tr>""")
 
-    out("""<div id="div_{oid}" style="display: none">""".format(
-            oid = func_oid))
+        self.out("</table>")
+        self.out("</center>")
+        self.out("</div>")
 
-    out("<center>")
-    out("""<table class="linestats" border="1" cellpadding="0" cellspacing="0" width="%s">""" %(config['table_width'], ))
-    out("""  <tr>""")
-    out("""    <th width="10%">Line</th>""")
-    out("""    <th width="10%">exec_count</th>""")
-    out("""    <th width="10%">total_time</th>""")
-    out("""    <th width="10%">longest_time</th>""")
-    out("""    <th width="60%">Source Code</th>""")
-    out("""  </tr>""")
+    def generate_flamegraph(self, config, data):
+        path = os.path.dirname(os.path.abspath(__file__))
+        path = os.path.join(path, 'lib', 'FlameGraph', 'flamegraph.pl', )
 
-    cur.execute("""SELECT l_line_number, l_source, l_exec_count,
-                    l_total_time, l_longest_time
-                    FROM pl_profiler_saved S
-                    JOIN pl_profiler_saved_linestats L ON L.l_s_id = S.s_id
-                    WHERE S.s_name = %s
-                      AND L.l_funcoid = %s
-                    ORDER BY l_s_id, l_funcoid, l_line_number""",
-                    (opt_name, func_oid, ))
-    for row in cur:
-        if row[0] == 0:
-            src = "<b>--&nbsp;Function&nbsp;Totals</b>"
-        else:
-            src = cgi.escape(row[1].expandtabs(int(config['tabstop']))).replace(" ", "&nbsp;")
-        out("""  <tr>""")
-        out("""    <td align="right"><code>{val}</code></td>""".format(val = row[0]))
-        out("""    <td align="right">{val}</td>""".format(val = row[2]))
-        out("""    <td class="bar" align="right">{val}</td>""".format(val = row[3]))
-        out("""    <td align="right">{val}</td>""".format(val = row[4]))
-        out("""    <td align="left"><code>{src}</code></td>""".format(src = src))
-        out("""  </tr>""")
+        proc = subprocess.Popen([path,
+                    "--title=%s" %(config['title'], ),
+                    "--width=%s" %(config['svg_width'], ), ],
+                    stdin = subprocess.PIPE,
+                    stdout = subprocess.PIPE,
+                    stderr = subprocess.PIPE);
+        svg, err = proc.communicate(data)
 
-    out("</table>")
-    out("</center>")
-    out("</div>")
+        if proc.returncode != 0:
+            raise Exception("flamegraph returned with exit code %d\n%s" %(
+                    proc.returncode, err))
+        return svg
+        # return "\n".join(svg.split("\n")[2:])
 
-    cur.close()
-
-def generate_flamegraph(db, opt_name, config):
-    cur = db.cursor()
-    cur.execute("""SELECT array_to_string(c_stack, ';'), c_us_self
-                    FROM pl_profiler_saved S
-                    JOIN pl_profiler_saved_callgraph C ON C.c_s_id = S.s_id
-                    WHERE S.s_name = %s""",
-                (opt_name, ))
-    data = ""
-    for row in cur:
-        data += str(row[0]) + " " + str(row[1]) + "\n"
-    cur.close()
-
-    path = os.path.dirname(os.path.abspath(__file__))
-    path = os.path.join(path, 'lib', 'FlameGraph', 'flamegraph.pl', )
-
-    proc = subprocess.Popen([path,
-                "--title=%s" %(config['title'], ),
-                "--width=%s" %(config['svg_width'], ), ],
-                stdin = subprocess.PIPE,
-                stdout = subprocess.PIPE,
-                stderr = subprocess.PIPE);
-    svg, err = proc.communicate(data)
-
-    if proc.returncode != 0:
-        raise Exception("flamegraph returned with exit code %d\n%s" %(
-                proc.returncode, err))
-    return "\n".join(svg.split("\n")[2:])
-
-def out(line):
-    global output_fd
-    output_fd.write(line + '\n')
+    def out(self, line):
+        self.outfd.write(line + '\n')
 
 HTML_SCRIPT = """
   <script language="javascript">

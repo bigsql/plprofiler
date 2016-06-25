@@ -10,7 +10,7 @@ import tempfile
 import traceback
 
 from plprofiler_data import plprofiler_data
-import plprofiler_report
+from plprofiler_report import plprofiler_report
 
 def main():
     if len(sys.argv) == 1:
@@ -30,7 +30,7 @@ def main():
         return delete_data_command(sys.argv[2:])
 
     if sys.argv[1] == 'report':
-        return plprofiler_report.report(sys.argv[2:])
+        return report_command(sys.argv[2:])
 
     sys.stderr.write("ERROR: unknown command '%s'\n" %(sys.argv[1]))
     return 2
@@ -282,6 +282,56 @@ def edit_config_info(config):
     for opt in opts:
         if tmp_config.has_option(name, opt):
             config[opt] = str(tmp_config.get(name, opt))
+
+def report_command(argv):
+    opt_conninfo = ''
+    opt_name = None
+    opt_top = 10
+    opt_output = None
+
+    try:
+        opts, args = getopt.getopt(argv, "c:n:o:t:", [
+                'conninfo=', 'name=', 'output=', 'top=', ])
+    except Exception as err:
+        sys.stderr.write(str(err) + '\n')
+        return 2
+
+    for opt, val in opts:
+        if opt in ('-c', '--conninfo', ):
+            opt_conninfo = val
+        elif opt in ('-n', '--name', ):
+            opt_name = val
+        elif opt in ('-o', '--output', ):
+            opt_output = val
+        elif opt in ('-t', '--top', ):
+            opt_top = int(val)
+
+    if opt_name is None:
+        sys.write.stderr("option --name must be given\n")
+        return 2
+
+    if opt_output is None:
+        output_fd = sys.stdout
+    else:
+        output_fd = open(opt_output, 'w')
+
+    try:
+        ppdata = plprofiler_data()
+        ppdata.connect(opt_conninfo)
+    except Exception as err:
+        sys.stderr.write(str(err) + '\n')
+        return 1
+
+    report_data = ppdata.get_saved_report_data(opt_name, opt_top, args)
+    config = report_data['config']
+
+    report = plprofiler_report()
+    report.generate(report_data, output_fd)
+
+    if opt_output is not None:
+        output_fd.close()
+
+    return 0
 
 def usage():
     print """
