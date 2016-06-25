@@ -105,7 +105,6 @@ CREATE TABLE pl_profiler_linestats_data (
 	total_time		int8,
 	longest_time	int8
 );
-GRANT INSERT, SELECT ON pl_profiler_linestats_data TO public;
 
 CREATE TABLE pl_profiler_callgraph_data (
     stack			oid[],
@@ -114,7 +113,6 @@ CREATE TABLE pl_profiler_callgraph_data (
 	us_children		int8,
 	us_self			int8
 );
-GRANT INSERT, SELECT ON pl_profiler_callgraph_data TO public;
 
 CREATE VIEW pl_profiler_linestats AS
 	SELECT L.func_oid,
@@ -128,7 +126,6 @@ CREATE VIEW pl_profiler_linestats AS
 		ON S.func_oid = L.func_oid AND S.line_number = L.line_number
 	GROUP BY L.func_oid, L.line_number, S.source
 	ORDER BY L.func_oid, L.line_number;
-GRANT SELECT ON pl_profiler_linestats TO public;
 
 CREATE VIEW pl_profiler_callgraph AS
 	SELECT pl_profiler_get_stack(stack) AS stack,
@@ -138,7 +135,6 @@ CREATE VIEW pl_profiler_callgraph AS
 		   sum(us_self) AS us_self
 	FROM pl_profiler_callgraph_data
 	GROUP BY stack;
-GRANT SELECT ON pl_profiler_callgraph TO public;
 
 CREATE VIEW pl_profiler_linestats_current AS
   SELECT L.func_oid, L.line_number,
@@ -151,7 +147,7 @@ CREATE VIEW pl_profiler_linestats_current AS
 GRANT SELECT ON pl_profiler_linestats_current TO public;
 
 CREATE VIEW pl_profiler_callgraph_current AS
-	SELECT pl_profiler_get_stack(stack), call_count,
+	SELECT pl_profiler_get_stack(stack) AS stack, call_count,
 		   us_total, us_children, us_self
     FROM pl_profiler_callgraph(false);
 GRANT SELECT ON pl_profiler_callgraph_current TO public;
@@ -161,7 +157,6 @@ CREATE TABLE pl_profiler_saved (
     s_name			text						NOT NULL UNIQUE,
 	s_options		text						NOT NULL DEFAULT ''
 );
-GRANT INSERT, DELETE, SELECT ON pl_profiler_saved TO public;
 
 CREATE TABLE pl_profiler_saved_functions (
 	f_s_id			integer						NOT NULL
@@ -174,7 +169,6 @@ CREATE TABLE pl_profiler_saved_functions (
 	f_funcargs		text						NOT NULL,
 	PRIMARY KEY (f_s_id, f_funcoid)
 );
-GRANT INSERT, DELETE, SELECT ON pl_profiler_saved_functions TO public;
 
 CREATE TABLE pl_profiler_saved_linestats (
 	l_s_id			integer						NOT NULL
@@ -188,7 +182,6 @@ CREATE TABLE pl_profiler_saved_linestats (
 	l_longest_time	bigint,
 	PRIMARY KEY (l_s_id, l_funcoid, l_line_number)
 );
-GRANT INSERT, DELETE, SELECT ON pl_profiler_saved_linestats TO public;
 
 CREATE TABLE pl_profiler_saved_callgraph (
 	c_s_id			integer						NOT NULL
@@ -201,5 +194,3 @@ CREATE TABLE pl_profiler_saved_callgraph (
 	c_us_self		bigint,
 	PRIMARY KEY (c_s_id, c_stack)
 );
-GRANT INSERT, DELETE, SELECT ON pl_profiler_saved_callgraph TO public;
-

@@ -364,7 +364,7 @@ class plprofiler:
         if func_oids is None or len(func_oids) == 0:
             func_oids_by_user = False
             func_oids = []
-            cur.execute("""SELECT regexp_replace(pl_profiler_get_stack[array_upper(pl_profiler_get_stack, 1)],
+            cur.execute("""SELECT regexp_replace(stack[array_upper(stack, 1)],
                                   E'.* oid=\\([0-9]*\\)$', E'\\\\1') as func_oid,
                                 sum(us_self) as us_self
                             FROM pl_profiler_callgraph_current C
@@ -409,7 +409,7 @@ class plprofiler:
             # First get the function definition and overall stats.
             # ----
             cur.execute("""WITH SELF AS (
-                            SELECT regexp_replace(pl_profiler_get_stack[array_upper(pl_profiler_get_stack, 1)],
+                            SELECT regexp_replace(stack[array_upper(stack, 1)],
                                       E'.* oid=\\([0-9]*\\)$', E'\\\\1') as func_oid,
                                     sum(us_self) as us_self
                                 FROM pl_profiler_callgraph_current C
@@ -468,7 +468,7 @@ class plprofiler:
         # ----
         # Get the callgraph data for building the flamegraph.
         # ----
-        cur.execute("""SELECT array_to_string(pl_profiler_get_stack, ';'), us_self
+        cur.execute("""SELECT array_to_string(stack, ';'), us_self
                         FROM pl_profiler_callgraph_current C""")
         flamedata = ""
         for row in cur:
