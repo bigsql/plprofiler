@@ -9,8 +9,7 @@ import sys
 import tempfile
 import traceback
 
-from plprofiler_data import plprofiler_data
-from plprofiler_report import plprofiler_report
+from plprofiler import plprofiler
 
 def main():
     if len(sys.argv) == 1:
@@ -106,9 +105,9 @@ def save_data_command(argv):
         opt_name = config['name']
 
     try:
-        ppdata = plprofiler_data()
-        ppdata.connect(opt_conninfo)
-        ppdata.save_dataset_from_data(opt_name, config, opt_force)
+        plp = plprofiler()
+        plp.connect(opt_conninfo)
+        plp.save_dataset_from_data(opt_name, config, opt_force)
 
     except Exception as err:
         sys.stderr.write(str(err) + '\n')
@@ -136,9 +135,9 @@ def list_data_command(argv):
     # Get the list of saved data sets.
     # ----
     try:
-        ppdata = plprofiler_data()
-        ppdata.connect(opt_conninfo)
-        rows = ppdata.get_dataset_list()
+        plp = plprofiler()
+        plp.connect(opt_conninfo)
+        rows = plp.get_dataset_list()
     except Exception as err:
         sys.stderr.write(str(err) + '\n')
         return 1
@@ -191,9 +190,9 @@ def edit_data_command(argv):
     # Get the current values and create a config with that.
     # ----
     try:
-        ppdata = plprofiler_data()
-        ppdata.connect(opt_conninfo)
-        config = ppdata.get_dataset_config(opt_name)
+        plp = plprofiler()
+        plp.connect(opt_conninfo)
+        config = plp.get_dataset_config(opt_name)
     except Exception as err:
         sys.stderr.write(str(err) + '\n')
         return 1
@@ -212,7 +211,7 @@ def edit_data_command(argv):
     # Update the dataset config
     # ----
     try:
-        ppdata.update_dataset_config(opt_name, new_name, config)
+        plp.update_dataset_config(opt_name, new_name, config)
     except Exception as err:
         sys.stderr.write(str(err) + '\n')
         return 1
@@ -247,9 +246,9 @@ def delete_data_command(argv):
     # Delete the requested data set.
     # ----
     try:
-        ppdata = plprofiler_data()
-        ppdata.connect(opt_conninfo)
-        ppdata.delete_dataset(opt_name)
+        plp = plprofiler()
+        plp.connect(opt_conninfo)
+        plp.delete_dataset(opt_name)
     except Exception as err:
         sys.stderr.write(str(err) + '\n')
         return 1
@@ -316,17 +315,16 @@ def report_command(argv):
         output_fd = open(opt_output, 'w')
 
     try:
-        ppdata = plprofiler_data()
-        ppdata.connect(opt_conninfo)
+        plp = plprofiler()
+        plp.connect(opt_conninfo)
     except Exception as err:
         sys.stderr.write(str(err) + '\n')
         return 1
 
-    report_data = ppdata.get_saved_report_data(opt_name, opt_top, args)
+    report_data = plp.get_saved_report_data(opt_name, opt_top, args)
     config = report_data['config']
 
-    report = plprofiler_report()
-    report.generate(report_data, output_fd)
+    plp.report(report_data, output_fd)
 
     if opt_output is not None:
         output_fd.close()

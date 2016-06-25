@@ -7,9 +7,11 @@
 import psycopg2
 import json
 
-__all__ = ['plprofiler_data', ]
+from plprofiler_report import plprofiler_report
 
-class plprofiler_data:
+__all__ = ['plprofiler', ]
+
+class plprofiler:
     def __init__(self):
         self.dbconn = None
 
@@ -149,12 +151,12 @@ class plprofiler_data:
                             s_options = %s
                         WHERE s_name = %s""",
                     (new_name, json.dumps(config), opt_name))
-        cur.execute("""RESET search_path""")
         if cur.rowcount != 1:
             self.dbconn.rollback()
             raise Exception("Data set with name '" + opt_name +
-                             "' no longer exists\n")
+                             "' no longer exists")
         else:
+            cur.execute("""RESET search_path""")
             self.dbconn.commit()
         cur.close()
 
@@ -168,7 +170,7 @@ class plprofiler_data:
         if cur.rowcount != 1:
             self.dbconn.rollback()
             raise Exception("Data set with name '" + opt_name +
-                             "' does not exists\n")
+                             "' does not exists")
         else:
             self.dbconn.commit()
         cur.close()
@@ -338,3 +340,6 @@ class plprofiler_data:
                 'found_more_funcs': found_more_funcs,
             }
 
+    def report(self, report_data, output_fd):
+        report = plprofiler_report()
+        report.generate(report_data, output_fd)
