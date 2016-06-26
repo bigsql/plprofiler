@@ -614,7 +614,21 @@ class plprofiler:
             for query in sql_split(sql).get_statements():
                 print query
                 cur.execute(query)
+                if cur.description is not None:
+                    if cur.rowcount == 0:
+                        print "(0 rows)"
+                    else:
+                        max_col_len = max([len(d.name) for d in cur.description])
+                        cols = ['  ' + ' '*(max_col_len - len(d[0])) + d[0] + ':'
+                                    for d in cur.description]
+                        for row in cur:
+                            print "-- row" + str(cur.rownumber) + ":"
+                            for col in range(0, len(cols)):
+                                print cols[col], str(row[col])
+                        print "----"
+                        print "(%d rows)" %(cur.rowcount, )
                 print cur.statusmessage
+                print ""
             self.dbconn.autocommit = False
         except Exception as err:
             self.dbconn.autocommit = False
