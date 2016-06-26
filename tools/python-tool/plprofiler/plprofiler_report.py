@@ -6,8 +6,6 @@ import os
 import subprocess
 import sys
 
-from plprofiler_data import plprofiler_data
-
 __all__ = ['plprofiler_report']
 
 class plprofiler_report:
