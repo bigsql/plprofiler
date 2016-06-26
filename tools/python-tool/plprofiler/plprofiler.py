@@ -138,14 +138,17 @@ class plprofiler:
         cur.execute("""INSERT INTO pl_profiler_saved_functions
                             (f_s_id, f_funcoid, f_schema, f_funcname,
                              f_funcresult, f_funcargs)
+                        WITH FL AS (
+                            SELECT DISTINCT func_oid
+                            FROM pl_profiler_linestats(false)
+                        )
                         SELECT currval('pl_profiler_saved_s_id_seq') as s_id,
                                P.oid, N.nspname, P.proname,
                                pg_catalog.pg_get_function_result(P.oid) as func_result,
                                pg_catalog.pg_get_function_arguments(P.oid) as func_args
                         FROM pg_catalog.pg_proc P
                         JOIN pg_catalog.pg_namespace N on N.oid = P.pronamespace
-                        WHERE P.oid IN (SELECT DISTINCT func_oid
-                                            FROM pl_profiler_linestats_current)
+                        JOIN FL ON FL.func_oid = P.oid
                         GROUP BY s_id, p.oid, nspname, proname
                         ORDER BY s_id, p.oid, nspname, proname""")
         if cur.rowcount == 0:
@@ -467,6 +470,20 @@ class plprofiler:
                 })
 
         # ----
+        # The view for linestats is extremely inefficient. We select
+        # all of it once and cache it in a hash table.
+        # ----
+        linestats = {}
+        cur.execute("""SELECT func_oid, line_number, exec_count,
+                            total_time, longest_time, line
+                        FROM pl_profiler_linestats_current
+                        ORDER BY func_oid, line_number""")
+        for row in cur:
+            if row[0] not in linestats:
+                linestats[row[0]] = []
+            linestats[row[0]].append(row)
+
+        # ----
         # Build a list of function definitions in the order, specified
         # by the func_oids list. This is either the oids, requested by
         # the user or the oids determined above in descending order of
@@ -478,20 +495,17 @@ class plprofiler:
             # First get the function definition and overall stats.
             # ----
             cur.execute("""WITH SELF AS (
-                            SELECT regexp_replace(stack[array_upper(stack, 1)],
+                                SELECT regexp_replace(stack[array_upper(stack, 1)],
                                       E'.* oid=\\([0-9]*\\)$', E'\\\\1') as func_oid,
                                     sum(us_self) as us_self
                                 FROM pl_profiler_callgraph_current C
                                 GROUP BY func_oid)
-                        SELECT L.func_oid, F.func_schema, F.func_name,
+                        SELECT F.func_oid, F.func_schema, F.func_name,
                             F.func_result, F.func_arguments,
-                            coalesce(L.total_time, 0) as total_time,
                             coalesce(SELF.us_self, 0) as self_time
-                            FROM pl_profiler_linestats_current L
-                            JOIN pl_profiler_all_functions F ON F.func_oid = L.func_oid
+                            FROM pl_profiler_all_functions F
                             LEFT JOIN SELF ON SELF.func_oid::bigint = F.func_oid
-                            WHERE L.func_oid = %s
-                              AND L.line_number = 0""",
+                            WHERE F.func_oid = %s""",
                         (func_oid, ))
             row = cur.fetchone()
             if row is None:
@@ -506,24 +520,18 @@ class plprofiler:
                     'funcname': row[2],
                     'funcresult': row[3],
                     'funcargs': row[4],
-                    'total_time': int(row[5]),
-                    'self_time': int(row[6]),
+                    'total_time': linestats[func_oid][0][3],
+                    'self_time': int(row[5]),
                     'source': [],
                 }
 
             # ----
             # Add all the source code lines to that.
             # ----
-            cur.execute("""SELECT line_number, line, exec_count,
-                            total_time, longest_time
-                            FROM pl_profiler_linestats_current L
-                            WHERE L.func_oid = %s
-                            ORDER BY L.func_oid, L.line_number""",
-                            (func_oid, ))
-            for row in cur:
+            for row in linestats[func_oid]:
                 func_def['source'].append({
-                        'line_number': int(row[0]),
-                        'source': row[1],
+                        'line_number': int(row[1]),
+                        'source': row[5],
                         'exec_count': int(row[2]),
                         'total_time': int(row[3]),
                         'longest_time': int(row[4]),

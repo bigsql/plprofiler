@@ -137,11 +137,14 @@ CREATE VIEW pl_profiler_callgraph AS
 	GROUP BY stack;
 
 CREATE VIEW pl_profiler_linestats_current AS
+  WITH S AS (
+    SELECT * FROM pl_profiler_all_source
+  )
   SELECT L.func_oid, L.line_number,
 		coalesce(S.source, '') AS line,
 		L.exec_count, L.total_time, L.longest_time
     FROM pl_profiler_linestats(false) L
-	LEFT JOIN pl_profiler_all_source S
+	LEFT JOIN S
 		ON S.func_oid = L.func_oid AND S.line_number = L.line_number
    ORDER BY L.func_oid, L.line_number;
 GRANT SELECT ON pl_profiler_linestats_current TO public;
