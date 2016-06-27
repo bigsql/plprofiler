@@ -7,6 +7,7 @@ import os
 import subprocess
 import sys
 import tempfile
+import time
 import traceback
 
 from plprofiler import plprofiler
@@ -33,6 +34,9 @@ def main():
 
     if sys.argv[1] == 'run':
         return run_command(sys.argv[2:])
+
+    if sys.argv[1] == 'monitor':
+        return monitor_command(sys.argv[2:])
 
     sys.stderr.write("ERROR: unknown command '%s'\n" %(sys.argv[1]))
     return 2
@@ -348,7 +352,7 @@ def run_command(argv):
     need_edit = False
 
     try:
-        opts, args = getopt.getopt(argv, "c:D:fN:o:q:s:t:T:", [
+        opts, args = getopt.getopt(argv, "c:D:fN:o:q:st:T:", [
                 'conninfo=', 'name=', 'title=', 'output=', 'top=',
                 'desc=', 'description=', 'query=', 'sql-file=',
                 'save', 'force', ])
@@ -453,6 +457,104 @@ def run_command(argv):
             report_data['config'] = config
             plp.report(report_data, output_fd)
             output_fd.close()
+
+    return 0
+
+def monitor_command(argv):
+    opt_conninfo = ''
+    opt_duration = 60
+    opt_interval = 10
+    opt_pid = None
+    opt_name = None
+    opt_title = None
+    opt_desc = None
+    opt_output = None
+    opt_force = False
+    need_edit = False
+
+    try:
+        opts, args = getopt.getopt(argv, "c:d:D:fi:N:p:T:", [
+                'conninfo=', 'duration=', 'interval=', 'name=', 'title=',
+                'desc=', 'description=', 'force', ])
+    except Exception as err:
+        sys.stderr.write(str(err) + '\n')
+        return 2
+
+    for opt, val in opts:
+        if opt in ('-c', '--conninfo', ):
+            opt_conninfo = val
+        elif opt in ('-d', '--duration', ):
+            opt_duration = val
+        elif opt in ('-p', '--pid', ):
+            opt_pid = val
+        elif opt in ('-i', '--interval', ):
+            opt_interval = val
+        elif opt in ('-N', '--name', ):
+            opt_name = val
+        elif opt in ('-T', '--title', ):
+            opt_title = val
+        elif opt in ('-D', '--desc', '--description', ):
+            opt_desc = val
+        elif opt in ('-f', '--force', ):
+            opt_force = True
+
+    if opt_name is None:
+        sys.stderr.write("--name must be specified\n")
+        return 2
+
+    if opt_title is None:
+        need_edit = True
+        opt_title = "PL Profiler Report for %s" %(opt_name, )
+
+    if opt_desc is None:
+        need_edit = True
+        opt_desc = ("<h1>PL Profiler Report for %s</h1>\n" +
+                    "<p>\n<!-- description here -->\n</p>") %(opt_name, )
+
+    try:
+        plp = plprofiler()
+        plp.connect(opt_conninfo)
+    except Exception as err:
+        sys.stderr.write(str(err) + '\n')
+        return 1
+
+    plp.reset_data()
+    plp.enable_monitor(opt_pid, opt_interval)
+    print "monitoring for %f seconds ..." %(float(opt_duration))
+    time.sleep(float(opt_duration))
+    print "done - saving collected profiler stats"
+    plp.disable_monitor()
+
+    # ----
+    # Create our config.
+    # ----
+    config = {
+        'name':         opt_name,
+        'title':        opt_title,
+        'tabstop':      8,
+        'svg_width':    1200,
+        'table_width':  '80%',
+        'desc':         opt_desc,
+    }
+
+    # ----
+    # If we set defaults for config options, invoke an editor.
+    # ----
+    if need_edit:
+        try:
+            edit_config_info(config)
+        except Exception as err:
+            sys.stderr.write(str(err) + '\n')
+            traceback.print_exc()
+            return 2
+        opt_name = config['name']
+
+    try:
+        plp.save_dataset_from_data(opt_name, config, opt_force)
+        plp.reset_data()
+    except Exception as err:
+        sys.stderr.write(str(err) + "\n")
+        return 1
 
     return 0
 

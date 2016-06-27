@@ -585,6 +585,28 @@ class plprofiler:
         self.dbconn.commit()
         cur.close()
 
+    def enable_monitor(self, opt_pid = None, opt_interval = 10):
+        self.dbconn.autocommit = True
+        cur = self.dbconn.cursor()
+        if opt_pid is not None:
+            cur.execute("""ALTER SYSTEM SET plprofiler.enable_pid TO %s""", (opt_pid, ))
+        else:
+            cur.execute("""ALTER SYSTEM SET plprofiler.enabled TO on""")
+        cur.execute("""ALTER SYSTEM SET plprofiler.save_interval TO %s""", (opt_interval, ))
+        cur.execute("""SELECT pg_catalog.pg_reload_conf()""")
+        self.dbconn.autocommit = False
+        cur.close()
+
+    def disable_monitor(self):
+        self.dbconn.autocommit = True
+        cur = self.dbconn.cursor()
+        cur.execute("""ALTER SYSTEM RESET plprofiler.enable_pid""")
+        cur.execute("""ALTER SYSTEM RESET plprofiler.enabled""")
+        cur.execute("""ALTER SYSTEM RESET plprofiler.save_interval""");
+        cur.execute("""SELECT pg_catalog.pg_reload_conf()""")
+        self.dbconn.autocommit = False
+        cur.close()
+
     def reset_current(self):
         cur = self.dbconn.cursor()
         cur.execute("""SET search_path TO %s""", (self.profiler_namespace, ))
