@@ -470,7 +470,7 @@ profiler_func_end(PLpgSQL_execstate *estate, PLpgSQL_function *func)
 	 * Finally if a plprofiler.save_interval is configured, save and reset
 	 * the stats if the interval has elapsed.
 	 */
-	if (profiler_save_interval > 0)
+	if (profiler_enabled && profiler_save_interval > 0)
 	{
 		time_t	now = time(NULL);
 
@@ -827,7 +827,6 @@ callGraph_collect(uint64 us_elapsed, uint64 us_self, uint64 us_children)
 
 	if (!found)
 	{
-		memcpy(&(entry->key), &graph_stack, sizeof(entry->key));
 		entry->callCount = 1;
 		entry->totalTime = us_elapsed;
 		entry->childTime = us_children;
