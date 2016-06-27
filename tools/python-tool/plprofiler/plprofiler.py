@@ -6,6 +6,7 @@
 
 import psycopg2
 import json
+import time
 
 from plprofiler_report import plprofiler_report
 from sql_split import sql_split
@@ -615,7 +616,9 @@ class plprofiler:
             cur = self.dbconn.cursor()
             for query in sql_split(sql).get_statements():
                 print query
+                start_time = time.time()
                 cur.execute(query)
+                end_time = time.time()
                 if cur.description is not None:
                     if cur.rowcount == 0:
                         print "(0 rows)"
@@ -629,7 +632,8 @@ class plprofiler:
                                 print cols[col], str(row[col])
                         print "----"
                         print "(%d rows)" %(cur.rowcount, )
-                print cur.statusmessage
+                latency = end_time - start_time
+                print cur.statusmessage, "(%.3f seconds)" %latency
                 print ""
             self.dbconn.autocommit = False
         except Exception as err:
