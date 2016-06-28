@@ -327,6 +327,7 @@ def report_command(argv):
     opt_top = 10
     opt_output = None
     opt_from_data = False
+    need_edit = False
 
     try:
         opts, args = getopt.getopt(argv,
@@ -369,6 +370,8 @@ def report_command(argv):
     if opt_name is None and not opt_from_data:
         sys.write.stderr("option --name or --from-data must be given\n")
         return 2
+    if opt_from_data and (opt_name is None or opt_title is None or opt_desc is None):
+        need_edit = True
 
     if opt_output is None:
         output_fd = sys.stdout
@@ -382,9 +385,33 @@ def report_command(argv):
         sys.stderr.write(str(err) + '\n')
         return 1
 
-    # TODO: Use get_report_data() in case of opt_from_data
-    report_data = plp.get_saved_report_data(opt_name, opt_top, args)
+    # ----
+    # Get the report data either from the collected *_data tables
+    # or a saved dataset.
+    # ----
+    if opt_from_data:
+        report_data = plp.get_report_data(opt_name, opt_top, args)
+    else:
+        report_data = plp.get_saved_report_data(opt_name, opt_top, args)
+
     config = report_data['config']
+    if opt_title is not None:
+        config['title'] = opt_title
+    if opt_desc is not None:
+        config['desc'] = opt_desc
+
+    # ----
+    # Invoke the editor on the config if need be.
+    # ----
+    if need_edit:
+        try:
+            edit_config_info(config)
+        except Exception as err:
+            sys.stderr.write(str(err) + '\n')
+            traceback.print_exc()
+            return 2
+        opt_name = config['name']
+        report_data['config'] = config
 
     plp.report(report_data, output_fd)
 
