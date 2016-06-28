@@ -12,22 +12,24 @@ import traceback
 
 from plprofiler import plprofiler
 
+__all__ = ['main']
+
 def main():
     if len(sys.argv) == 1:
         usage()
         return 2
 
     if sys.argv[1] == 'save':
-        return save_data_command(sys.argv[2:])
+        return save_command(sys.argv[2:])
 
     if sys.argv[1] == 'list':
-        return list_data_command(sys.argv[2:])
+        return list_command(sys.argv[2:])
 
     if sys.argv[1] == 'edit':
-        return edit_data_command(sys.argv[2:])
+        return edit_command(sys.argv[2:])
 
     if sys.argv[1] == 'delete':
-        return delete_data_command(sys.argv[2:])
+        return delete_command(sys.argv[2:])
 
     if sys.argv[1] == 'report':
         return report_command(sys.argv[2:])
@@ -41,8 +43,11 @@ def main():
     sys.stderr.write("ERROR: unknown command '%s'\n" %(sys.argv[1]))
     return 2
 
-def save_data_command(argv):
-    opt_conninfo = ''
+# ----
+# save_data_command
+# ----
+def save_command(argv):
+    connoptions = {}
     opt_name = None
     opt_title = None
     opt_desc = None
@@ -53,23 +58,36 @@ def save_data_command(argv):
     # Parse command line
     # ----
     try:
-        opts, args = getopt.getopt(argv, "c:D:fN:T:", [
-                'conninfo=', 'name=', 'title=', 'force',
-                'desc=', 'description=', ])
+        opts, args = getopt.getopt(argv,
+                # Standard connection related options
+                "d:h:p:U:", [
+                'dbname=', 'host=', 'port=', 'user=',
+                # save command specific options
+                'name=', 'title=', 'desc=', 'description=', 'force', ])
     except Exception as err:
         sys.stderr.write(str(err) + '\n')
         return 1
 
     for opt, val in opts:
-        if opt in ['-c', '--conninfo']:
-            opt_conninfo = val
-        elif opt in ['-N', '--name']:
+        if opt in ['-d', '--dbname']:
+            if val.find('=') < 0:
+                connoptions['database'] = val
+            else:
+                connoptions['dsn'] = val
+        elif opt in ['-h', '--host']:
+            connoptions['host'] = val
+        elif opt in ['-p', '--port']:
+            connoptions['port'] = int(val)
+        elif opt in ['-U', '--user']:
+            connoptions['user'] = val
+
+        elif opt in ['--name']:
             opt_name = val
-        elif opt in ['-T', '--title']:
+        elif opt in ['--title']:
             opt_title = val
-        elif opt in ['-D', '--desc', '--description']:
+        elif opt in ['--desc', '--description']:
             opt_desc = val
-        elif opt in ['-f', '--force']:
+        elif opt in ['--force']:
             opt_force = True
 
     if opt_name is None:
@@ -113,7 +131,7 @@ def save_data_command(argv):
 
     try:
         plp = plprofiler()
-        plp.connect(opt_conninfo)
+        plp.connect(connoptions)
         plp.save_dataset_from_data(opt_name, config, opt_force)
 
     except Exception as err:
@@ -121,29 +139,42 @@ def save_data_command(argv):
         traceback.print_exc()
         return 1
 
-def list_data_command(argv):
-    opt_conninfo = ''
+def list_command(argv):
+    connoptions = {}
 
     # ----
     # Parse command line
     # ----
     try:
-        opts, args = getopt.getopt(argv, "c:", [
-                'conninfo=', ])
+        opts, args = getopt.getopt(argv,
+                # Standard connection related options
+                "d:h:p:U:", [
+                'dbname=', 'host=', 'port=', 'user=',
+                # list command specific options (none at the moment)
+                ])
     except Exception as err:
         sys.stderr.write(str(err) + '\n')
         return 1
 
     for opt, val in opts:
-        if opt in ['-c', '--conninfo']:
-            opt_conninfo = val
+        if opt in ['-d', '--dbname']:
+            if val.find('=') < 0:
+                connoptions['database'] = val
+            else:
+                connoptions['dsn'] = val
+        elif opt in ['-h', '--host']:
+            connoptions['host'] = val
+        elif opt in ['-p', '--port']:
+            connoptions['port'] = int(val)
+        elif opt in ['-U', '--user']:
+            connoptions['user'] = val
 
     # ----
     # Get the list of saved data sets.
     # ----
     try:
         plp = plprofiler()
-        plp.connect(opt_conninfo)
+        plp.connect(connoptions)
         rows = plp.get_dataset_list()
     except Exception as err:
         sys.stderr.write(str(err) + '\n')
@@ -169,24 +200,38 @@ def list_data_command(argv):
         print ""
     return 0
 
-def edit_data_command(argv):
-    opt_conninfo = ''
+def edit_command(argv):
+    connoptions = {}
     opt_name = None
 
     # ----
     # Parse command line
     # ----
     try:
-        opts, args = getopt.getopt(argv, "c:N:", [
-                'conninfo=', 'name=', ])
+        opts, args = getopt.getopt(argv,
+                # Standard connection related options
+                "d:h:p:U:", [
+                'dbname=', 'host=', 'port=', 'user=',
+                # edit command specific coptions
+                'name=', ])
     except Exception as err:
         sys.stderr.write(str(err) + '\n')
         return 1
 
     for opt, val in opts:
-        if opt in ['-c', '--conninfo']:
-            opt_conninfo = val
-        elif opt in ['-N', '--name']:
+        if opt in ['-d', '--dbname']:
+            if val.find('=') < 0:
+                connoptions['database'] = val
+            else:
+                connoptions['dsn'] = val
+        elif opt in ['-h', '--host']:
+            connoptions['host'] = val
+        elif opt in ['-p', '--port']:
+            connoptions['port'] = int(val)
+        elif opt in ['-U', '--user']:
+            connoptions['user'] = val
+
+        elif opt in ['--name']:
             opt_name = val
 
     if opt_name is None:
@@ -198,7 +243,7 @@ def edit_data_command(argv):
     # ----
     try:
         plp = plprofiler()
-        plp.connect(opt_conninfo)
+        plp.connect(connoptions)
         config = plp.get_dataset_config(opt_name)
     except Exception as err:
         sys.stderr.write(str(err) + '\n')
@@ -225,24 +270,38 @@ def edit_data_command(argv):
 
     return 0
 
-def delete_data_command(argv):
-    opt_conninfo = ''
+def delete_command(argv):
+    connoptions = {}
     opt_name = None
 
     # ----
     # Parse command line
     # ----
     try:
-        opts, args = getopt.getopt(argv, "c:N:", [
-                'conninfo=', 'name=', ])
+        opts, args = getopt.getopt(argv,
+                # Standard connection related options
+                "d:h:p:U:", [
+                'dbname=', 'host=', 'port=', 'user=',
+                # edit command specific coptions
+                'name=', ])
     except Exception as err:
         sys.stderr.write(str(err) + '\n')
         return 1
 
     for opt, val in opts:
-        if opt in ['-c', '--conninfo']:
-            opt_conninfo = val
-        elif opt in ['-N', '--name']:
+        if opt in ['-d', '--dbname']:
+            if val.find('=') < 0:
+                connoptions['database'] = val
+            else:
+                connoptions['dsn'] = val
+        elif opt in ['-h', '--host']:
+            connoptions['host'] = val
+        elif opt in ['-p', '--port']:
+            connoptions['port'] = int(val)
+        elif opt in ['-U', '--user']:
+            connoptions['user'] = val
+
+        elif opt in ['--name']:
             opt_name = val
 
     if opt_name is None:
@@ -254,66 +313,61 @@ def delete_data_command(argv):
     # ----
     try:
         plp = plprofiler()
-        plp.connect(opt_conninfo)
+        plp.connect(connoptions)
         plp.delete_dataset(opt_name)
     except Exception as err:
         sys.stderr.write(str(err) + '\n')
         return 1
 
-def edit_config_info(config):
-    EDITOR = os.environ.get('EDITOR','vim') #that easy!
-    opts = ['title', 'tabstop', 'svg_width', 'table_width', 'desc', ]
-
-    name = config['name']
-    tmp_config = ConfigParser.RawConfigParser()
-    tmp_config.add_section(name)
-    for opt in opts:
-        tmp_config.set(name, opt, str(config[opt]))
-
-    with tempfile.NamedTemporaryFile(suffix=".tmp.conf") as tf:
-        tmp_config.write(tf)
-        tf.flush()
-        subprocess.call([EDITOR, tf.name])
-
-        for s in tmp_config.sections():
-            tmp_config.remove_section(s)
-
-        tf.seek(0)
-        tmp_config.readfp(tf)
-
-    if len(tmp_config.sections()) != 1:
-        raise Exception("config must have exactly one section")
-    name = tmp_config.sections()[0]
-    config['name'] = name
-    for opt in opts:
-        if tmp_config.has_option(name, opt):
-            config[opt] = str(tmp_config.get(name, opt))
-
 def report_command(argv):
-    opt_conninfo = ''
+    connoptions = {}
     opt_name = None
+    opt_title = None
+    opt_desc = None
     opt_top = 10
     opt_output = None
+    opt_from_data = False
 
     try:
-        opts, args = getopt.getopt(argv, "c:N:o:t:", [
-                'conninfo=', 'name=', 'output=', 'top=', ])
+        opts, args = getopt.getopt(argv,
+                # Standard connection related options
+                "d:h:o:p:U:", [
+                'dbname=', 'host=', 'port=', 'user=',
+                # report command specific options
+                'name=', 'title=', 'desc=', 'description=',
+                'output=', 'top=', 'from-data', ])
     except Exception as err:
         sys.stderr.write(str(err) + '\n')
         return 2
 
     for opt, val in opts:
-        if opt in ('-c', '--conninfo', ):
-            opt_conninfo = val
-        elif opt in ('-N', '--name', ):
+        if opt in ['-d', '--dbname']:
+            if val.find('=') < 0:
+                connoptions['database'] = val
+            else:
+                connoptions['dsn'] = val
+        elif opt in ['-h', '--host']:
+            connoptions['host'] = val
+        elif opt in ['-p', '--port']:
+            connoptions['port'] = int(val)
+        elif opt in ['-U', '--user']:
+            connoptions['user'] = val
+
+        elif opt in ['--name']:
             opt_name = val
+        elif opt in ['--title']:
+            opt_title = val
+        elif opt in ['--desc', '--description']:
+            opt_desc = val
         elif opt in ('-o', '--output', ):
             opt_output = val
-        elif opt in ('-t', '--top', ):
+        elif opt in ('--top', ):
             opt_top = int(val)
+        elif opt in ('--from-data', ):
+            opt_from_data = True
 
-    if opt_name is None:
-        sys.write.stderr("option --name must be given\n")
+    if opt_name is None and not opt_from_data:
+        sys.write.stderr("option --name or --from-data must be given\n")
         return 2
 
     if opt_output is None:
@@ -323,11 +377,12 @@ def report_command(argv):
 
     try:
         plp = plprofiler()
-        plp.connect(opt_conninfo)
+        plp.connect(connoptions)
     except Exception as err:
         sys.stderr.write(str(err) + '\n')
         return 1
 
+    # TODO: Use get_report_data() in case of opt_from_data
     report_data = plp.get_saved_report_data(opt_name, opt_top, args)
     config = report_data['config']
 
@@ -339,7 +394,7 @@ def report_command(argv):
     return 0
 
 def run_command(argv):
-    opt_conninfo = ''
+    connoptions = {}
     opt_name = None
     opt_title = None
     opt_desc = None
@@ -352,28 +407,42 @@ def run_command(argv):
     need_edit = False
 
     try:
-        opts, args = getopt.getopt(argv, "c:D:fN:o:q:st:T:", [
-                'conninfo=', 'name=', 'title=', 'output=', 'top=',
-                'desc=', 'description=', 'query=', 'sql-file=',
-                'save', 'force', ])
+        opts, args = getopt.getopt(argv,
+                # Standard connection related options
+                "c:d:f:h:o:p:U:", [
+                'dbname=', 'host=', 'port=', 'user=',
+                # run command specific options
+                'name=', 'title=', 'desc=', 'description=',
+                'command=', 'file=',
+                'save=', 'force', 'output=', 'top=', ])
     except Exception as err:
         sys.stderr.write(str(err) + '\n')
         return 2
 
     for opt, val in opts:
-        if opt in ('-c', '--conninfo', ):
-            opt_conninfo = val
-        elif opt in ('-N', '--name', ):
+        if opt in ['-d', '--dbname']:
+            if val.find('=') < 0:
+                connoptions['database'] = val
+            else:
+                connoptions['dsn'] = val
+        elif opt in ['-h', '--host']:
+            connoptions['host'] = val
+        elif opt in ['-p', '--port']:
+            connoptions['port'] = int(val)
+        elif opt in ['-U', '--user']:
+            connoptions['user'] = val
+
+        elif opt in ['--name']:
             opt_name = val
         elif opt in ('-T', '--title', ):
             opt_title = val
         elif opt in ('-D', '--desc', '--description', ):
             opt_desc = val
-        elif opt in ('-q', '--query', ):
+        elif opt in ('-c', '--command', ):
             opt_query = val
-        elif opt in ('-s', '--sql-file', ):
+        elif opt in ('-f', '--file', ):
             opt_sql_file = val
-        elif opt in ('-t', '--top', ):
+        elif opt in ('--top', ):
             opt_top = int(val)
         elif opt in ('-o', '--output', ):
             opt_output = val
@@ -405,13 +474,9 @@ def run_command(argv):
         with open(opt_sql_file, 'r') as fd:
             opt_query = fd.read()
 
-    if opt_output is None and opt_save is None:
-        sys.stderr.write("One of --output or --save must be given\n")
-        return 2
-
     try:
         plp = plprofiler()
-        plp.connect(opt_conninfo)
+        plp.connect(connoptions)
     except Exception as err:
         sys.stderr.write(str(err) + '\n')
         return 1
@@ -461,102 +526,88 @@ def run_command(argv):
     return 0
 
 def monitor_command(argv):
-    opt_conninfo = ''
+    connoptions = {}
     opt_duration = 60
     opt_interval = 10
     opt_pid = None
-    opt_name = None
-    opt_title = None
-    opt_desc = None
-    opt_output = None
-    opt_force = False
-    need_edit = False
 
     try:
-        opts, args = getopt.getopt(argv, "c:d:D:fi:N:p:T:", [
-                'conninfo=', 'duration=', 'interval=', 'name=', 'title=',
-                'desc=', 'description=', 'force', ])
+        opts, args = getopt.getopt(argv,
+                # Standard connection related options
+                "d:h:p:U:", [
+                'dbname=', 'host=', 'port=', 'user=',
+                # monitor command specific options
+                'pid=', 'interval=', 'duration=', ])
     except Exception as err:
         sys.stderr.write(str(err) + '\n')
         return 2
 
     for opt, val in opts:
-        if opt in ('-c', '--conninfo', ):
-            opt_conninfo = val
-        elif opt in ('-d', '--duration', ):
-            opt_duration = val
+        if opt in ['-d', '--dbname']:
+            if val.find('=') < 0:
+                connoptions['database'] = val
+            else:
+                connoptions['dsn'] = val
+        elif opt in ['-h', '--host']:
+            connoptions['host'] = val
+        elif opt in ['-p', '--port']:
+            connoptions['port'] = int(val)
+        elif opt in ['-U', '--user']:
+            connoptions['user'] = val
+
         elif opt in ('-p', '--pid', ):
             opt_pid = val
         elif opt in ('-i', '--interval', ):
             opt_interval = val
-        elif opt in ('-N', '--name', ):
-            opt_name = val
-        elif opt in ('-T', '--title', ):
-            opt_title = val
-        elif opt in ('-D', '--desc', '--description', ):
-            opt_desc = val
-        elif opt in ('-f', '--force', ):
-            opt_force = True
-
-    if opt_name is None:
-        sys.stderr.write("--name must be specified\n")
-        return 2
-
-    if opt_title is None:
-        need_edit = True
-        opt_title = "PL Profiler Report for %s" %(opt_name, )
-
-    if opt_desc is None:
-        need_edit = True
-        opt_desc = ("<h1>PL Profiler Report for %s</h1>\n" +
-                    "<p>\n<!-- description here -->\n</p>") %(opt_name, )
+        elif opt in ('-d', '--duration', ):
+            opt_duration = val
 
     try:
         plp = plprofiler()
-        plp.connect(opt_conninfo)
+        plp.connect(connoptions)
     except Exception as err:
         sys.stderr.write(str(err) + '\n')
         return 1
 
     plp.reset_data()
     plp.enable_monitor(opt_pid, opt_interval)
-    print "monitoring for %f seconds ..." %(float(opt_duration))
-    time.sleep(float(opt_duration))
-    print "done - saving collected profiler stats"
-    plp.disable_monitor()
-
-    # ----
-    # Create our config.
-    # ----
-    config = {
-        'name':         opt_name,
-        'title':        opt_title,
-        'tabstop':      8,
-        'svg_width':    1200,
-        'table_width':  '80%',
-        'desc':         opt_desc,
-    }
-
-    # ----
-    # If we set defaults for config options, invoke an editor.
-    # ----
-    if need_edit:
-        try:
-            edit_config_info(config)
-        except Exception as err:
-            sys.stderr.write(str(err) + '\n')
-            traceback.print_exc()
-            return 2
-        opt_name = config['name']
-
+    print "monitoring for %d seconds ..." %(int(opt_duration))
     try:
-        plp.save_dataset_from_data(opt_name, config, opt_force)
-        plp.reset_data()
-    except Exception as err:
-        sys.stderr.write(str(err) + "\n")
-        return 1
+        time.sleep(int(opt_duration))
+    finally:
+        plp.disable_monitor()
+    print "done."
 
     return 0
+
+def edit_config_info(config):
+    EDITOR = os.environ.get('EDITOR','vim') #that easy!
+    opts = ['title', 'tabstop', 'svg_width', 'table_width', 'desc', ]
+
+    name = config['name']
+    tmp_config = ConfigParser.RawConfigParser()
+    tmp_config.add_section(name)
+    for opt in opts:
+        tmp_config.set(name, opt, str(config[opt]))
+
+    with tempfile.NamedTemporaryFile(suffix=".tmp.conf") as tf:
+        tmp_config.write(tf)
+        tf.flush()
+        subprocess.call([EDITOR, tf.name])
+
+        for s in tmp_config.sections():
+            tmp_config.remove_section(s)
+
+        tf.seek(0)
+        tmp_config.readfp(tf)
+
+    if len(tmp_config.sections()) != 1:
+        raise Exception("config must have exactly one section")
+    name = tmp_config.sections()[0]
+    config['name'] = name
+    for opt in opts:
+        if tmp_config.has_option(name, opt):
+            config[opt] = str(tmp_config.get(name, opt))
 
 def usage():
     print """

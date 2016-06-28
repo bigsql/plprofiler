@@ -17,11 +17,13 @@ class plprofiler:
     def __init__(self):
         self.dbconn = None
 
-    def connect(self, conninfo):
+    def connect(self, connoptions):
         # ----
         # Connect to the database and get the plprofiler schema name.
         # ----
-        self.dbconn = psycopg2.connect(conninfo)
+        if len(connoptions) == 0:
+            connoptions['dsn'] = ''
+        self.dbconn = psycopg2.connect(**connoptions)
         self.profiler_namespace = self.get_profiler_namespace()
 
     def get_profiler_namespace(self):
