@@ -13,7 +13,7 @@ CREATE FUNCTION pl_profiler_linestats(
 )
 RETURNS SETOF record
 AS 'MODULE_PATHNAME'
-LANGUAGE C;
+LANGUAGE C ROWS 1000000;
 GRANT EXECUTE ON FUNCTION pl_profiler_linestats(bool) TO public;
 
 CREATE FUNCTION pl_profiler_callgraph(
@@ -26,16 +26,27 @@ CREATE FUNCTION pl_profiler_callgraph(
 )
 RETURNS SETOF record
 AS 'MODULE_PATHNAME'
-LANGUAGE C;
+LANGUAGE C ROWS 1000000;
 GRANT EXECUTE ON FUNCTION pl_profiler_callgraph(bool) TO public;
 
-CREATE FUNCTION pl_profiler_get_stack(stack oid[])
-RETURNS text[]
+CREATE FUNCTION pl_profiler_func_oids_current()
+RETURNS oid[]
 AS 'MODULE_PATHNAME'
 LANGUAGE C;
-GRANT EXECUTE ON FUNCTION pl_profiler_get_stack(oid[]) TO public;
+GRANT EXECUTE ON FUNCTION pl_profiler_func_oids_current() TO public;
 
-CREATE FUNCTION pl_profiler_get_import_stack(stack oid[])
+CREATE FUNCTION pl_profiler_funcs_source(
+	IN  func_oids oid[],
+	OUT func_oid oid,
+	OUT line_number int8,
+	OUT source text
+)
+RETURNS SETOF record
+AS 'MODULE_PATHNAME'
+LANGUAGE C ROWS 1000000;
+GRANT EXECUTE ON FUNCTION pl_profiler_funcs_source(oid[]) TO public;
+
+CREATE FUNCTION pl_profiler_get_stack(stack oid[])
 RETURNS text[]
 AS 'MODULE_PATHNAME'
 LANGUAGE C;
@@ -53,50 +64,11 @@ AS 'MODULE_PATHNAME'
 LANGUAGE C;
 GRANT EXECUTE ON FUNCTION pl_profiler_enable(bool) TO public;
 
-CREATE FUNCTION pl_profiler_save_stats()
+CREATE FUNCTION pl_profiler_collect_data()
 RETURNS int4
 AS 'MODULE_PATHNAME'
 LANGUAGE C;
-GRANT EXECUTE ON FUNCTION pl_profiler_save_stats() TO public;
-
-CREATE FUNCTION pl_profiler_source_lines(
-	IN  func_oid oid,
-	OUT source text,
-	OUT line_number bigint)
-RETURNS SETOF RECORD
-AS $$
-    SELECT *, row_number() OVER ()
-		FROM regexp_split_to_table((SELECT prosrc
-										FROM pg_catalog.pg_proc
-										WHERE oid = func_oid),
-									E'\\n')
-$$ LANGUAGE sql;
-GRANT EXECUTE ON FUNCTION pl_profiler_source_lines(oid) TO public;
-
-CREATE VIEW pl_profiler_all_source AS
-	SELECT P.oid AS func_oid,
-		   S.line_number,
-		   S.source
-		FROM pg_catalog.pg_proc P,
-			 pg_catalog.pg_language L,
-			 pl_profiler_source_lines(P.oid) S
-		WHERE L.lanname = 'plpgsql'
-		  AND P.prolang = L.oid;
-GRANT SELECT ON pl_profiler_all_source TO public;
-
-CREATE VIEW pl_profiler_all_functions AS
-	SELECT P.oid AS func_oid,
-		   N.nspname AS func_schema,
-		   P.proname AS func_name,
-		   pg_catalog.pg_get_function_result(P.oid) AS func_result,
-		   pg_catalog.pg_get_function_arguments(P.oid) AS func_arguments
-		FROM pg_catalog.pg_proc P,
-			 pg_catalog.pg_language L,
-			 pg_catalog.pg_namespace N
-		WHERE L.lanname = 'plpgsql'
-		  AND P.prolang = L.oid
-		  AND N.oid = P.pronamespace;
-GRANT SELECT ON pl_profiler_all_functions TO public;
+GRANT EXECUTE ON FUNCTION pl_profiler_collect_data() TO public;
 
 CREATE TABLE pl_profiler_linestats_data (
 	func_oid		oid,
@@ -113,47 +85,6 @@ CREATE TABLE pl_profiler_callgraph_data (
 	us_children		int8,
 	us_self			int8
 );
-
-CREATE VIEW pl_profiler_linestats AS
-	SELECT L.func_oid,
-		   L.line_number,
-		   coalesce(S.source, '') AS line,
-		   sum(exec_count) AS exec_count,
-		   sum(total_time) AS total_time,
-		   max(longest_time) AS longest_time
-	FROM pl_profiler_linestats_data L
-	LEFT JOIN pl_profiler_all_source S
-		ON S.func_oid = L.func_oid AND S.line_number = L.line_number
-	GROUP BY L.func_oid, L.line_number, S.source
-	ORDER BY L.func_oid, L.line_number;
-
-CREATE VIEW pl_profiler_callgraph AS
-	SELECT pl_profiler_get_stack(stack) AS stack,
-		   sum(call_count) AS call_count,
-		   sum(us_total) AS us_total,
-		   sum(us_children) AS us_children,
-		   sum(us_self) AS us_self
-	FROM pl_profiler_callgraph_data
-	GROUP BY stack;
-
-CREATE VIEW pl_profiler_linestats_current AS
-  WITH S AS (
-    SELECT * FROM pl_profiler_all_source
-  )
-  SELECT L.func_oid, L.line_number,
-		coalesce(S.source, '') AS line,
-		L.exec_count, L.total_time, L.longest_time
-    FROM pl_profiler_linestats(false) L
-	LEFT JOIN S
-		ON S.func_oid = L.func_oid AND S.line_number = L.line_number
-   ORDER BY L.func_oid, L.line_number;
-GRANT SELECT ON pl_profiler_linestats_current TO public;
-
-CREATE VIEW pl_profiler_callgraph_current AS
-	SELECT pl_profiler_get_stack(stack) AS stack, call_count,
-		   us_total, us_children, us_self
-    FROM pl_profiler_callgraph(false);
-GRANT SELECT ON pl_profiler_callgraph_current TO public;
 
 CREATE TABLE pl_profiler_saved (
 	s_id			serial						PRIMARY KEY,

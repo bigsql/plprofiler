@@ -52,6 +52,7 @@ PG_MODULE_MAGIC;
 
 #define PL_PROFILE_COLS		5
 #define PL_CALLGRAPH_COLS	5
+#define PL_FUNCS_SRC_COLS	3
 #define PL_MAX_STACK_DEPTH	100
 
 /**********************************************************************
@@ -135,20 +136,22 @@ static time_t			last_save_time = 0;
 PLpgSQL_plugin		  **plugin_ptr = NULL;
 
 Datum pl_profiler_get_stack(PG_FUNCTION_ARGS);
-Datum pl_profiler_get_import_stack(PG_FUNCTION_ARGS);
 Datum pl_profiler_linestats(PG_FUNCTION_ARGS);
 Datum pl_profiler_callgraph(PG_FUNCTION_ARGS);
+Datum pl_profiler_func_oids_current(PG_FUNCTION_ARGS);
+Datum pl_profiler_funcs_source(PG_FUNCTION_ARGS);
 Datum pl_profiler_reset(PG_FUNCTION_ARGS);
 Datum pl_profiler_enable(PG_FUNCTION_ARGS);
-Datum pl_profiler_save_stats(PG_FUNCTION_ARGS);
+Datum pl_profiler_collect_data(PG_FUNCTION_ARGS);
 
 PG_FUNCTION_INFO_V1(pl_profiler_get_stack);
-PG_FUNCTION_INFO_V1(pl_profiler_get_import_stack);
 PG_FUNCTION_INFO_V1(pl_profiler_linestats);
 PG_FUNCTION_INFO_V1(pl_profiler_callgraph);
+PG_FUNCTION_INFO_V1(pl_profiler_func_oids_current);
+PG_FUNCTION_INFO_V1(pl_profiler_funcs_source);
 PG_FUNCTION_INFO_V1(pl_profiler_reset);
 PG_FUNCTION_INFO_V1(pl_profiler_enable);
-PG_FUNCTION_INFO_V1(pl_profiler_save_stats);
+PG_FUNCTION_INFO_V1(pl_profiler_collect_data);
 
 /**********************************************************************
  * Exported function prototypes
@@ -183,7 +186,7 @@ static void callGraph_check(Oid func_oid);
 static void callGraph_collect(uint64 us_elapsed, uint64 us_self,
 							  uint64 us_children);
 static void profiler_enabled_assign(bool newval, void *extra);
-static void profiler_save_stats(void);
+static void profiler_collect_data(void);
 static Oid get_extension_schema(Oid ext_oid);
 
 /**********************************************************************
@@ -239,7 +242,7 @@ _PG_init(void)
 							NULL);
 
 	DefineCustomStringVariable("plprofiler.save_linestats_table",
-							"The table in which the pl_profiler_save_stats() "
+							"The table in which the pl_profiler_collect_data() "
 							"function (and the interval saving) will insert "
 							"per source line stats into",
 							NULL,
@@ -252,7 +255,7 @@ _PG_init(void)
 							NULL);
 
 	DefineCustomStringVariable("plprofiler.save_callgraph_table",
-							"The table in which the pl_profiler_save_stats() "
+							"The table in which the pl_profiler_collect_data() "
 							"function (and the interval saving) will insert "
 							"call graph stats into",
 							NULL,
@@ -476,7 +479,7 @@ profiler_func_end(PLpgSQL_execstate *estate, PLpgSQL_function *func)
 
 		if (now >= last_save_time + profiler_save_interval)
 		{
-		    profiler_save_stats();
+		    profiler_collect_data();
 			last_save_time = now;
 		}
 	}
@@ -869,10 +872,10 @@ profiler_enabled_assign(bool newval, void *extra)
 }
 
 static void
-profiler_save_stats(void)
+profiler_collect_data(void)
 {
 	SPI_push();
-	DirectFunctionCall1(pl_profiler_save_stats, (Datum)0);
+	DirectFunctionCall1(pl_profiler_collect_data, (Datum)0);
 	SPI_pop();
 }
 
@@ -989,113 +992,6 @@ pl_profiler_get_stack(PG_FUNCTION_ARGS)
 }
 
 /* -------------------------------------------------------------------
- * pl_profiler_get_import_stack()
- *
- *	Turn an array of Oids into the textual representation based
- *	on the import table.
- * -------------------------------------------------------------------
- */
-Datum
-pl_profiler_get_import_stack(PG_FUNCTION_ARGS)
-{
-	ArrayType		   *stack_in = PG_GETARG_ARRAYTYPE_P(0);
-	Datum			   *stack_oid;
-	bool			   *nulls;
-	int					nelems;
-	int					i;
-	Datum			   *funcdefs;
-	char				funcdef_buf[100 + NAMEDATALEN * 2];
-	static SPIPlanPtr	lookup_plan = NULL;
-
-	if (SPI_connect() != SPI_OK_CONNECT)
-		elog(ERROR, "SPI_connect() failed in pl_profiler_save_stats()");
-
-	/*
-	 * If not done yet, figure out which namespace the plprofiler
-	 * extension is installed in.
-	 */
-	if (profiler_namespace == NULL)
-	{
-		MemoryContext	oldcxt;
-
-		/* Figure out our extension installation schema. */
-		oldcxt = MemoryContextSwitchTo(TopMemoryContext);
-		profiler_namespace = get_namespace_name(get_extension_schema(
-							 get_extension_oid("plprofiler", false)));
-		MemoryContextSwitchTo(oldcxt);
-	}
-
-	/*
-	 * Prepare the query plan to lookup the function schema and name
-	 * in pg_profiler_import_functions.
-	 */
-	if (lookup_plan == NULL)
-	{
-		char	query[100 + NAMEDATALEN * 2];
-		Oid		argtypes[1];
-
-		snprintf(query, sizeof(query),
-				 "SELECT func_schema, func_name "
-				 "    FROM pl_profiler_import_functions "
-				 "    WHERE func_oid = $1");
-		argtypes[0] = OIDOID;
-		lookup_plan = SPI_saveplan(SPI_prepare(query, 1, argtypes));
-		if (lookup_plan == NULL)
-		{
-			elog(ERROR, "SPI_prepare() failed");
-		}
-	}
-
-	/* Take the input array apart */
-	deconstruct_array(stack_in, OIDOID,
-					  sizeof(Oid), true, 'i',
-					  &stack_oid, &nulls, &nelems);
-
-	/* Allocate the Datum array for the individual function signatures. */
-	funcdefs = palloc(sizeof(Datum) * nelems);
-
-	/*
-	 * Turn each of the function Oids, that are in the array, into
-	 * a text that is "schema.funcname(funcargs) oid=funcoid".
-	 */
-	for (i = 0; i < nelems; i++)
-	{
-		char	   *funcname;
-		char	   *nspname;
-		Datum		plan_args[1];
-
-		/*
-		 * Run the prepared plan to lookup the function in the
-		 * import table.
-		 */
-		plan_args[0] = stack_oid[i];
-		if (SPI_execp(lookup_plan, plan_args, NULL, 0) != SPI_OK_SELECT)
-			elog(ERROR, "SPI_execp() for import function lookup failed");
-		if (SPI_processed != 1)
-			elog(ERROR, "lookup of import function %u failed",
-				 DatumGetObjectId(stack_oid[i]));
-
-		nspname = SPI_getvalue(SPI_tuptable->vals[0],
-							   SPI_tuptable->tupdesc, 1);
-		funcname = SPI_getvalue(SPI_tuptable->vals[0],
-								SPI_tuptable->tupdesc, 2);
-
-		snprintf(funcdef_buf, sizeof(funcdef_buf),
-				 "%s.%s() oid=%u", nspname, funcname,
-				 DatumGetObjectId(stack_oid[i]));
-
-		funcdefs[i] = PointerGetDatum(cstring_to_text(funcdef_buf));
-	}
-
-	SPI_finish();
-
-	/* Return the texts as a text[]. */
-	PG_RETURN_ARRAYTYPE_P(PointerGetDatum(construct_array(funcdefs, nelems,
-														  TEXTOID, -1,
-														  false, 'i')));
-}
-
-/* -------------------------------------------------------------------
  * pl_profiler_linestats()
  *
  *	Returns the current content of the line stats hash table
@@ -1151,7 +1047,7 @@ pl_profiler_linestats(PG_FUNCTION_ARGS)
 
 			/*
 			 * If filter_zero is true we are called from
-			 * pl_profiler_save_stats() to save the current hash table
+			 * pl_profiler_collect_data() to save the current hash table
 			 * data into pl_profiler_linestats_data. We filter out
 			 * rows that are not new and have a zero exec_count.
 			 */
@@ -1235,7 +1131,6 @@ pl_profiler_callgraph(PG_FUNCTION_ARGS)
 	rsinfo->setDesc = tupdesc;
 
 	MemoryContextSwitchTo(oldcontext);
-	SPI_connect();
 
 	if (callGraph_stats != NULL)
 	{
@@ -1251,7 +1146,7 @@ pl_profiler_callgraph(PG_FUNCTION_ARGS)
 
 			/*
 			 * Filter out call stacks that have not been seen since
-			 * the last save_stats() call.
+			 * the last collect_data() call.
 			 */
 			if (filter_zero && entry->callCount == 0)
 				continue;
@@ -1279,7 +1174,181 @@ pl_profiler_callgraph(PG_FUNCTION_ARGS)
 	/* clean up and return the tuplestore */
 	tuplestore_donestoring(tupstore);
 
-	SPI_finish();
+	return (Datum)0;
+}
+
+/* -------------------------------------------------------------------
+ * pl_profiler_func_oids_current()
+ *
+ *	Returns an array of all function Oids that we currently have
+ *	linestat information for.
+ * -------------------------------------------------------------------
+ */
+Datum
+pl_profiler_func_oids_current(PG_FUNCTION_ARGS)
+{
+	int					i = 0;
+	Datum			   *result;
+	HASH_SEQ_STATUS		hash_seq;
+	lineEntry		   *entry;
+
+	/* First pass to count the number of Oids, we will return. */
+
+	if (line_stats != NULL)
+	{
+		hash_seq_init(&hash_seq, line_stats);
+		while ((entry = hash_seq_search(&hash_seq)) != NULL)
+		{
+			if (entry->key.line_number == 0)
+				i++;
+		}
+	}
+
+	/* Allocate Oid array for result. */
+	if (i == 0)
+	{
+		result = palloc(sizeof(Datum));
+	}
+	else
+	{
+		result = palloc(sizeof(Datum) * i);
+	}
+	if (result == NULL)
+		elog(ERROR, "out of memory in pl_profiler_func_oids_current()");
+
+	/* Second pass to collect the Oids. */
+	if (line_stats != NULL)
+	{
+		i = 0;
+		hash_seq_init(&hash_seq, line_stats);
+		while ((entry = hash_seq_search(&hash_seq)) != NULL)
+		{
+			if (entry->key.line_number == 0)
+				result[i++] = ObjectIdGetDatum(entry->key.func_oid);
+		}
+	}
+
+	/* Build and return the actual array. */
+	PG_RETURN_ARRAYTYPE_P(PointerGetDatum(construct_array(result, i,
+														  OIDOID, sizeof(Oid),
+														  true, 'i')));
+}
+
+/* -------------------------------------------------------------------
+ * pl_profiler_funcs_source(func_oids oid[])
+ *
+ *	Return the source code of a number of functions specified by
+ *	an input array of Oids.
+ * -------------------------------------------------------------------
+ */
+Datum
+pl_profiler_funcs_source(PG_FUNCTION_ARGS)
+{
+	ArrayType		   *func_oids_in = PG_GETARG_ARRAYTYPE_P(0);
+	Datum			   *func_oids;
+	bool			   *nulls;
+	int					nelems;
+	ReturnSetInfo	   *rsinfo = (ReturnSetInfo *)fcinfo->resultinfo;
+	TupleDesc			tupdesc;
+	Tuplestorestate	   *tupstore;
+	MemoryContext		per_query_ctx;
+	MemoryContext		oldcontext;
+	int					fidx;
+
+	/* check to see if caller supports us returning a tuplestore */
+	if (rsinfo == NULL || !IsA(rsinfo, ReturnSetInfo))
+		ereport(ERROR,
+				(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+				 errmsg("set-valued function called in context "
+						"that cannot accept a set")));
+	if (!(rsinfo->allowedModes & SFRM_Materialize))
+		ereport(ERROR,
+				(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+				 errmsg("materialize mode required, but it is not "
+						"allowed in this context")));
+
+	/* Build a tuple descriptor for our result type */
+	if (get_call_result_type(fcinfo, NULL, &tupdesc) != TYPEFUNC_COMPOSITE)
+		elog(ERROR, "return type must be a row type");
+
+	per_query_ctx = rsinfo->econtext->ecxt_per_query_memory;
+	oldcontext = MemoryContextSwitchTo(per_query_ctx);
+
+	tupstore = tuplestore_begin_heap(true, false, work_mem);
+	rsinfo->returnMode = SFRM_Materialize;
+	rsinfo->setResult = tupstore;
+	rsinfo->setDesc = tupdesc;
+
+	MemoryContextSwitchTo(oldcontext);
+
+	/* Take the input array apart */
+	deconstruct_array(func_oids_in, OIDOID,
+					  sizeof(Oid), true, 'i',
+					  &func_oids, &nulls, &nelems);
+
+	/*
+	 * Turn each of the function Oids, that are in the array, into
+	 * a text that is "schema.funcname(funcargs) oid=funcoid".
+	 */
+	for (fidx = 0; fidx < nelems; fidx++)
+	{
+		HeapTuple	procTuple;
+		char	   *procSrc;
+		char	   *funcName;
+		Datum		values[PL_FUNCS_SRC_COLS];
+		bool		nulls[PL_FUNCS_SRC_COLS];
+		int			i = 0;
+		char	   *cp;
+		char	   *linestart;
+		int64		line_number = 1;
+
+		/* Create the line-0 entry. */
+		MemSet(values, 0, sizeof(values));
+		MemSet(nulls, 0, sizeof(nulls));
+
+		values[i++] = func_oids[fidx];
+		values[i++] = (Datum)0;
+		values[i++] = PointerGetDatum(cstring_to_text("-- Line 0"));
+
+		Assert(i == PL_FUNCS_SRC_COLS);
+		tuplestore_putvalues(tupstore, tupdesc, values, nulls);
+
+		/* Find the source code and split it. */
+		procSrc = findSource(func_oids[fidx], &procTuple, &funcName);
+		if (procSrc == NULL)
+		{
+			ReleaseSysCache(procTuple);
+			continue;
+		}
+
+		/*
+		 * The returned procStr is palloc'd, so it is safe to scribble
+		 * around in it.
+		 */
+		cp = procSrc;
+		linestart = procSrc;
+		while (cp != NULL)
+		{
+			cp = strchr(cp, '\n');
+			if (cp != NULL)
+				*cp++ = '\0';
+			i = 0;
+			values[i++] = func_oids[fidx];
+			values[i++] = Int64GetDatumFast(line_number++);
+			values[i++] = PointerGetDatum(cstring_to_text(linestart));
+
+			Assert(i == PL_FUNCS_SRC_COLS);
+			tuplestore_putvalues(tupstore, tupdesc, values, nulls);
+
+			linestart = cp;
+		}
+
+		ReleaseSysCache(procTuple);
+		pfree(procSrc);
+	}
+
+	/* clean up and return the tuplestore */
+	tuplestore_donestoring(tupstore);
 
 	return (Datum)0;
 }
@@ -1327,14 +1396,14 @@ pl_profiler_enable(PG_FUNCTION_ARGS)
 }
 
 /* -------------------------------------------------------------------
- * pl_profiler_save_stats()
+ * pl_profiler_collect_data()
  *
  *	Save the current content of the hash tables into the configured
  *	permanent tables and reset the counters.
  * -------------------------------------------------------------------
  */
 Datum
-pl_profiler_save_stats(PG_FUNCTION_ARGS)
+pl_profiler_collect_data(PG_FUNCTION_ARGS)
 {
 	HASH_SEQ_STATUS		hash_seq;
 	lineEntry		   *lineEnt;
@@ -1343,7 +1412,7 @@ pl_profiler_save_stats(PG_FUNCTION_ARGS)
 	int32				result = 0;
 
 	if (SPI_connect() != SPI_OK_CONNECT)
-		elog(ERROR, "SPI_connect() failed in pl_profiler_save_stats()");
+		elog(ERROR, "SPI_connect() failed in pl_profiler_collect_data()");
 
 	/*
 	 * If not done yet, figure out which namespace the plprofiler

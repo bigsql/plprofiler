@@ -93,7 +93,11 @@ class plprofiler:
                                sum(L.exec_count), sum(L.total_time),
                                max(L.longest_time)
                         FROM pl_profiler_linestats_data L
-                        LEFT JOIN pl_profiler_all_source S
+                        LEFT JOIN pl_profiler_funcs_source(
+                                    ARRAY(SELECT f_funcoid
+                                            FROM pl_profiler_saved_functions
+                                            WHERE f_s_id = currval('pl_profiler_saved_s_id_seq'))
+                                ) S
                             ON S.func_oid = L.func_oid
                             AND S.line_number = L.line_number
                         GROUP BY s_id, L.func_oid, L.line_number, S.source
@@ -141,17 +145,13 @@ class plprofiler:
         cur.execute("""INSERT INTO pl_profiler_saved_functions
                             (f_s_id, f_funcoid, f_schema, f_funcname,
                              f_funcresult, f_funcargs)
-                        WITH FL AS (
-                            SELECT DISTINCT func_oid
-                            FROM pl_profiler_linestats(false)
-                        )
                         SELECT currval('pl_profiler_saved_s_id_seq') as s_id,
                                P.oid, N.nspname, P.proname,
                                pg_catalog.pg_get_function_result(P.oid) as func_result,
                                pg_catalog.pg_get_function_arguments(P.oid) as func_args
                         FROM pg_catalog.pg_proc P
                         JOIN pg_catalog.pg_namespace N on N.oid = P.pronamespace
-                        JOIN FL ON FL.func_oid = P.oid
+                        WHERE P.oid IN (SELECT * FROM unnest(pl_profiler_func_oids_current()))
                         GROUP BY s_id, p.oid, nspname, proname
                         ORDER BY s_id, p.oid, nspname, proname""")
         if cur.rowcount == 0:
@@ -164,11 +164,14 @@ class plprofiler:
                              l_total_time, l_longest_time)
                         SELECT currval('pl_profiler_saved_s_id_seq') as s_id,
                                L.func_oid, L.line_number,
-                               coalesce(L.line, '-- SOURCE NOT FOUND'),
+                               coalesce(S.source, '-- SOURCE NOT FOUND'),
                                sum(L.exec_count), sum(L.total_time),
                                max(L.longest_time)
-                        FROM pl_profiler_linestats_current L
-                        GROUP BY s_id, L.func_oid, L.line_number, L.line
+                        FROM pl_profiler_linestats(false) L
+                        JOIN pl_profiler_funcs_source(pl_profiler_func_oids_current()) S
+                            ON S.func_oid = L.func_oid
+                            AND S.line_number = L.line_number
+                        GROUP BY s_id, L.func_oid, L.line_number, S.source
                         ORDER BY s_id, L.func_oid, L.line_number""")
         if cur.rowcount == 0:
             self.dbconn.rollback()
@@ -178,10 +181,10 @@ class plprofiler:
                             (c_s_id, c_stack, c_call_count, c_us_total,
                              c_us_children, c_us_self)
                         SELECT currval('pl_profiler_saved_s_id_seq') as s_id,
-                               stack,
+                               pl_profiler_get_stack(stack),
                                sum(call_count), sum(us_total),
                                sum(us_children), sum(us_self)
-                        FROM pl_profiler_callgraph_current
+                        FROM pl_profiler_callgraph(false)
                         GROUP BY s_id, stack
                         ORDER BY s_id, stack;""")
 
@@ -439,10 +442,9 @@ class plprofiler:
         if func_oids is None or len(func_oids) == 0:
             func_oids_by_user = False
             func_oids = []
-            cur.execute("""SELECT regexp_replace(stack[array_upper(stack, 1)],
-                                  E'.* oid=\\([0-9]*\\)$', E'\\\\1') as func_oid,
+            cur.execute("""SELECT stack[array_upper(stack, 1)] as func_oid,
                                 sum(us_self) as us_self
-                            FROM pl_profiler_callgraph_current C
+                            FROM pl_profiler_callgraph(false) C
                             GROUP BY func_oid
                             ORDER BY us_self DESC
                             LIMIT %s""", (opt_top + 1, ))
@@ -458,11 +460,12 @@ class plprofiler:
         # ----
         # Get an alphabetically sorted list of the selected functions.
         # ----
-        cur.execute("""SELECT func_oid, func_schema, func_name
-                        FROM pl_profiler_all_functions F
-                        WHERE F.func_oid IN (SELECT * FROM unnest(%s))
-                        ORDER BY upper(func_schema), func_schema,
-                                 upper(func_name), func_name""", (func_oids, ))
+        cur.execute("""SELECT P.oid, N.nspname, P.proname
+                        FROM pg_catalog.pg_proc P
+                        JOIN pg_catalog.pg_namespace N ON N.oid = P.pronamespace
+                        WHERE P.oid IN (SELECT * FROM unnest(%s))
+                        ORDER BY upper(nspname), nspname,
+                                 upper(proname), proname""", (func_oids, ))
 
         func_list = []
         for row in cur:
@@ -477,10 +480,13 @@ class plprofiler:
         # all of it once and cache it in a hash table.
         # ----
         linestats = {}
-        cur.execute("""SELECT func_oid, line_number, exec_count,
-                            total_time, longest_time, line
-                        FROM pl_profiler_linestats_current
-                        ORDER BY func_oid, line_number""")
+        cur.execute("""SELECT L.func_oid, L.line_number, L.exec_count,
+                            L.total_time, L.longest_time, S.source
+                        FROM pl_profiler_linestats(false) L
+                        JOIN pl_profiler_funcs_source(pl_profiler_func_oids_current()) S
+                            ON S.func_oid = L.func_oid
+                            AND S.line_number = L.line_number
+                        ORDER BY L.func_oid, L.line_number""")
         for row in cur:
             if row[0] not in linestats:
                 linestats[row[0]] = []
@@ -497,18 +503,19 @@ class plprofiler:
             # ----
             # First get the function definition and overall stats.
             # ----
-            cur.execute("""WITH SELF AS (
-                                SELECT regexp_replace(stack[array_upper(stack, 1)],
-                                      E'.* oid=\\([0-9]*\\)$', E'\\\\1') as func_oid,
+            cur.execute("""WITH SELF AS (SELECT
+                                stack[array_upper(stack, 1)] as func_oid,
                                     sum(us_self) as us_self
-                                FROM pl_profiler_callgraph_current C
+                                FROM pl_profiler_callgraph(false)
                                 GROUP BY func_oid)
-                        SELECT F.func_oid, F.func_schema, F.func_name,
-                            F.func_result, F.func_arguments,
+                        SELECT P.oid, N.nspname, P.proname,
+                            pg_catalog.pg_get_function_result(P.oid),
+                            pg_catalog.pg_get_function_arguments(P.oid),
                             coalesce(SELF.us_self, 0) as self_time
-                            FROM pl_profiler_all_functions F
-                            LEFT JOIN SELF ON SELF.func_oid::bigint = F.func_oid
-                            WHERE F.func_oid = %s""",
+                            FROM pg_catalog.pg_proc P
+                            JOIN pg_catalog.pg_namespace N ON N.oid = P.pronamespace
+                            LEFT JOIN SELF ON SELF.func_oid = P.oid
+                            WHERE P.oid = %s""",
                         (func_oid, ))
             row = cur.fetchone()
             if row is None:
@@ -548,8 +555,8 @@ class plprofiler:
         # ----
         # Get the callgraph data for building the flamegraph.
         # ----
-        cur.execute("""SELECT array_to_string(stack, ';'), us_self
-                        FROM pl_profiler_callgraph_current C""")
+        cur.execute("""SELECT array_to_string(pl_profiler_get_stack(stack), ';'), us_self
+                        FROM pl_profiler_callgraph(false)""")
         flamedata = ""
         for row in cur:
             flamedata += str(row[0]) + " " + str(row[1]) + "\n"
