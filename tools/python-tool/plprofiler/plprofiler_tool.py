@@ -414,7 +414,7 @@ def run_command(argv):
                 # run command specific options
                 'name=', 'title=', 'desc=', 'description=',
                 'command=', 'file=',
-                'save=', 'force', 'output=', 'top=', ])
+                'save', 'force', 'output=', 'top=', ])
     except Exception as err:
         sys.stderr.write(str(err) + '\n')
         return 2
