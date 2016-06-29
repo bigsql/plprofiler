@@ -121,6 +121,75 @@ class plprofiler:
         cur.close()
         self.dbconn.commit()
 
+    def save_dataset_from_report(self, report_data, overwrite = False):
+        # ----
+        # Save a dataset from the output of a get_*_report_data function.
+        # This is used by the "import" command.
+        # ----
+        cur = self.dbconn.cursor()
+        cur.execute("""SET search_path TO %s;""", (self.profiler_namespace, ))
+        cur.execute("""SET TRANSACTION ISOLATION LEVEL REPEATABLE READ;""")
+
+        config = report_data['config']
+        opt_name = config['name']
+
+        # ----
+        # Load the pl_profiler_saved entry.
+        # ----
+        try:
+            if overwrite:
+                cur.execute("""DELETE FROM pl_profiler_saved
+                                WHERE s_name = %s""", (opt_name, ))
+            cur.execute("""INSERT INTO pl_profiler_saved
+                                (s_name, s_options)
+                            VALUES (%s, %s)""",
+                        (opt_name, json.dumps(config)))
+        except psycopg2.IntegrityError as err:
+            self.dbconn.rollback()
+            raise err
+
+        # ----
+        # From the funcdefs, load the pl_profiler_saved_functions
+        # and the pl_profiler_saved_linestats.
+        # ----
+        for funcdef in report_data['func_defs']:
+            cur.execute("""INSERT INTO pl_profiler_saved_functions
+                                (f_s_id, f_funcoid, f_schema, f_funcname,
+                                 f_funcresult, f_funcargs)
+                            VALUES
+                                (currval('pl_profiler_saved_s_id_seq'),
+                                 %s, %s, %s, %s, %s)""",
+                            (funcdef['funcoid'], funcdef['schema'],
+                             funcdef['funcname'], funcdef['funcresult'],
+                             funcdef['funcargs']))
+
+            for src in funcdef['source']:
+                cur.execute("""INSERT INTO pl_profiler_saved_linestats
+                                    (l_s_id, l_funcoid,
+                                     l_line_number, l_source, l_exec_count,
+                                     l_total_time, l_longest_time)
+                                VALUES
+                                    (currval('pl_profiler_saved_s_id_seq'),
+                                     %s, %s, %s, %s, %s, %s)""",
+                                (funcdef['funcoid'], src['line_number'],
+                                 src['source'], src['exec_count'],
+                                 src['total_time'], src['longest_time'], ))
+
+        # ----
+        # Finally insert the callgraph data.
+        # ----
+        for row in report_data['callgraph']:
+            cur.execute("""INSERT INTO pl_profiler_saved_callgraph
+                                (c_s_id, c_stack, c_call_count, c_us_total,
+                                 c_us_children, c_us_self)
+                            VALUES
+                                (currval('pl_profiler_saved_s_id_seq'),
+                                 %s::text[], %s, %s, %s, %s)""", row)
+
+        cur.execute("""RESET search_path""")
+        cur.close()
+        self.dbconn.commit()
+
     def save_dataset_from_current(self, opt_name, config, overwrite = False):
         # ----
         # Aggregate the existing data found in pl_profiler_linestats_current
@@ -393,13 +462,18 @@ class plprofiler:
             func_defs.append(func_def)
 
         # ----
-        # Get the callgraph data for building the flamegraph.
+        # Get the callgraph data for building the flamegraph as well as
+        # for export.
         # ----
-        cur.execute("""SELECT array_to_string(pl_profiler_get_stack(stack), ';'), us_self
+        cur.execute("""SELECT array_to_string(pl_profiler_get_stack(stack), ';'),
+                            stack,
+                            call_count, us_total, us_children, us_self
                         FROM pl_profiler_callgraph_data""")
         flamedata = ""
+        callgraph = []
         for row in cur:
-            flamedata += str(row[0]) + " " + str(row[1]) + "\n"
+            flamedata += str(row[0]) + " " + str(row[5]) + "\n"
+            callgraph.append(row[1:])
 
         # ----
         # That is it. Reset things and return the report data.
@@ -412,6 +486,7 @@ class plprofiler:
                 'func_list': func_list,
                 'func_defs': func_defs,
                 'flamedata': flamedata,
+                'callgraph': callgraph,
                 'func_oids_by_user': func_oids_by_user,
                 'found_more_funcs': found_more_funcs,
             }
@@ -550,13 +625,17 @@ class plprofiler:
             func_defs.append(func_def)
 
         # ----
-        # Get the callgraph data for building the flamegraph.
+        # Get the callgraph data.
         # ----
-        cur.execute("""SELECT array_to_string(pl_profiler_get_stack(stack), ';'), us_self
+        cur.execute("""SELECT array_to_string(pl_profiler_get_stack(stack), ';'),
+                            stack,
+                            call_count, us_total, us_children, us_self
                         FROM pl_profiler_callgraph(false)""")
         flamedata = ""
+        callgraph = []
         for row in cur:
-            flamedata += str(row[0]) + " " + str(row[1]) + "\n"
+            flamedata += str(row[0]) + " " + str(row[5]) + "\n"
+            callgraph.append(row[1:])
 
         # ----
         # That is it. Reset things and return the report data.
@@ -569,6 +648,7 @@ class plprofiler:
                 'func_list': func_list,
                 'func_defs': func_defs,
                 'flamedata': flamedata,
+                'callgraph': callgraph,
                 'func_oids_by_user': func_oids_by_user,
                 'found_more_funcs': found_more_funcs,
             }
@@ -712,16 +792,20 @@ class plprofiler:
             func_defs.append(func_def)
 
         # ----
-        # Get the callgraph data for building the flamegraph.
+        # Get the callgraph data.
         # ----
-        cur.execute("""SELECT array_to_string(c_stack, ';'), c_us_self
+        cur.execute("""SELECT array_to_string(c_stack, ';'),
+                            c_stack,
+                            c_call_count, c_us_total, c_us_children, c_us_self
                         FROM pl_profiler_saved S
                         JOIN pl_profiler_saved_callgraph C ON C.c_s_id = S.s_id
                         WHERE S.s_name = %s""",
                     (opt_name, ))
         flamedata = ""
+        callgraph = []
         for row in cur:
-            flamedata += str(row[0]) + " " + str(row[1]) + "\n"
+            flamedata += str(row[0]) + " " + str(row[5]) + "\n"
+            callgraph.append(row[1:])
 
         # ----
         # That is it. Reset things and return the report data.
@@ -734,6 +818,7 @@ class plprofiler:
                 'func_list': func_list,
                 'func_defs': func_defs,
                 'flamedata': flamedata,
+                'callgraph': callgraph,
                 'func_oids_by_user': func_oids_by_user,
                 'found_more_funcs': found_more_funcs,
             }

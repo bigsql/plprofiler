@@ -34,6 +34,12 @@ def main():
     if sys.argv[1] == 'report':
         return report_command(sys.argv[2:])
 
+    if sys.argv[1] == 'export':
+        return export_command(sys.argv[2:])
+
+    if sys.argv[1] == 'import':
+        return import_command(sys.argv[2:])
+
     if sys.argv[1] == 'run':
         return run_command(sys.argv[2:])
 
@@ -417,6 +423,198 @@ def report_command(argv):
 
     if opt_output is not None:
         output_fd.close()
+
+    return 0
+
+def export_command(argv):
+    connoptions = {}
+    opt_all = False
+    opt_name = None
+    opt_title = None
+    opt_desc = None
+    opt_top = pow(2, 31)
+    opt_output = None
+    opt_from_data = False
+    opt_edit = False
+
+    try:
+        opts, args = getopt.getopt(argv,
+                # Standard connection related options
+                "d:h:o:p:U:", [
+                'dbname=', 'host=', 'port=', 'user=',
+                # report command specific options
+                'all', 'name=', 'title=', 'desc=', 'description=',
+                'output=', 'from-data', ])
+    except Exception as err:
+        sys.stderr.write(str(err) + '\n')
+        return 2
+
+    for opt, val in opts:
+        if opt in ['-d', '--dbname']:
+            if val.find('=') < 0:
+                connoptions['database'] = val
+            else:
+                connoptions['dsn'] = val
+        elif opt in ['-h', '--host']:
+            connoptions['host'] = val
+        elif opt in ['-p', '--port']:
+            connoptions['port'] = int(val)
+        elif opt in ['-U', '--user']:
+            connoptions['user'] = val
+
+        elif opt in ['--all']:
+            opt_all = True
+        elif opt in ['--name']:
+            opt_name = val
+        elif opt in ['--title']:
+            opt_title = val
+        elif opt in ['--desc', '--description']:
+            opt_desc = val
+        elif opt in ('-o', '--output', ):
+            opt_output = val
+        elif opt in ('--from-data', ):
+            opt_from_data = True
+
+    if not opt_all and opt_name is None and not opt_from_data:
+        sys.write.stderr("option --all, --name or --from-data must be given\n")
+        return 2
+
+    if opt_all:
+        export_names = [row[0] for row in plp.get_dataset_list()]
+    else:
+        if opt_from_data:
+            export_names = ['collected_data']
+        else:
+            export_names = [opt_name]
+
+    if opt_output is None:
+        output_fd = sys.stdout
+    else:
+        output_fd = open(opt_output, 'w')
+
+    try:
+        plp = plprofiler()
+        plp.connect(connoptions)
+    except Exception as err:
+        sys.stderr.write(str(err) + '\n')
+        return 1
+
+    # ----
+    # Build the export data set.
+    # ----
+    export_set = []
+    for name in export_names:
+        # ----
+        # Get the report data either from the collected *_data tables
+        # or a saved dataset.
+        # ----
+        if opt_from_data:
+            report_data = plp.get_report_data(name, opt_top, args)
+        else:
+            report_data = plp.get_saved_report_data(name, opt_top, args)
+
+        config = report_data['config']
+        if opt_title is not None:
+            config['title'] = opt_title
+        if opt_desc is not None:
+            config['desc'] = opt_desc
+
+        # ----
+        # Launch an editor if we are asked to edit configs.
+        # ----
+        if opt_edit:
+            try:
+                edit_config_info(config)
+            except Exception as err:
+                sys.stderr.write(str(err) + '\n')
+                traceback.print_exc()
+                return 2
+            report_data['config'] = config
+
+        export_set.append(report_data)
+
+    # ----
+    # Write the whole thing out.
+    # ----
+    output_fd.write(json.dumps(export_set, indent = 2, sort_keys = True) + "\n")
+
+    if opt_output is not None:
+        output_fd.close()
+
+    return 0
+
+def import_command(argv):
+    connoptions = {}
+    opt_file = None
+    opt_edit = False
+    opt_force = False
+
+    try:
+        opts, args = getopt.getopt(argv,
+                # Standard connection related options
+                "d:f:h:p:U:", [
+                'dbname=', 'host=', 'port=', 'user=',
+                # report command specific options
+                'file=', 'edit', 'force', ])
+    except Exception as err:
+        sys.stderr.write(str(err) + '\n')
+        return 2
+
+    for opt, val in opts:
+        if opt in ['-d', '--dbname']:
+            if val.find('=') < 0:
+                connoptions['database'] = val
+            else:
+                connoptions['dsn'] = val
+        elif opt in ['-h', '--host']:
+            connoptions['host'] = val
+        elif opt in ['-p', '--port']:
+            connoptions['port'] = int(val)
+        elif opt in ['-U', '--user']:
+            connoptions['user'] = val
+
+        elif opt in ['-f', '--file']:
+            opt_file = val
+        elif opt in ['--edit']:
+            opt_edit = True
+        elif opt in ['--force']:
+            opt_force = True
+
+    if opt_file is None:
+        sys.write.stderr("option --file must be given\n")
+        return 2
+
+    try:
+        plp = plprofiler()
+        plp.connect(connoptions)
+    except Exception as err:
+        sys.stderr.write(str(err) + '\n')
+        return 1
+
+    # ----
+    # Read the export data set and process it.
+    # ----
+    with open(opt_file, 'r') as fd:
+        import_set = json.loads(fd.read())
+
+    for report_data in import_set:
+        # ----
+        # Launch an editor if we are asked to edit configs.
+        # ----
+        if opt_edit:
+            try:
+                config = report_data['config']
+                edit_config_info(config)
+            except Exception as err:
+                sys.stderr.write(str(err) + '\n')
+                traceback.print_exc()
+                return 2
+            report_data['config'] = config
+
+        # ----
+        # Try to save this report as a saved set.
+        # ----
+        plp.save_dataset_from_report(report_data, opt_force)
 
     return 0
 
