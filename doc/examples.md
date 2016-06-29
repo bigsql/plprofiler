@@ -9,7 +9,7 @@ The example test case
 All examples in this documentation are based on a modified pgbench database. The modifications are:
 
 * The SQL queries, that make up the TPC-B style business transaction of pgbench, have been implemented in a set of PL/pgSQL functions. Each function essentially performs only one of the TPC-B queries. This is on purpose convoluted, since for demonstration purposes we want a simple, yet nested example. The function definitions can be found in [examples/pgbench_pl.sql](../examples/pgbench_pl.sql).
-* A custom pgbench, found in [examples/pgbench_pl.profile](pgbench_pl.profile.md), is used with the -f option when invoking pgbench. 
+* A custom pgbench, found in [examples/pgbench_pl.profile](../examples/pgbench_pl.profile), is used with the -f option when invoking pgbench. 
 * The table pgbench_accounts is modified.
     * The filler column is expanded and filled with 500 characters of data.
     * A new column, `category interger` is added in front of the aid and made part of the primary key.
@@ -30,7 +30,7 @@ Since the first column of the index is not part of the WHERE clause and thus, th
 
 On top of that, since the queries accessing the table will never show up in any statistics, we will never see that each of them takes 30ms already on a 10x pgbench scaling factor. Imagine what that turns into when we scale out.
 
-The full script to prepare the pgbench test database is found [here](prepdb.sh.md).
+The full script to prepare the pgbench test database is found [here](../examples/prepdb.sh).
 
 Executing SQL using the plprofiler utility
 ------------------------------------------
