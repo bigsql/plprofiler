@@ -19,6 +19,34 @@ def main():
         usage()
         return 2
 
+    if sys.argv[1] in ['-?', '--help', 'help']:
+        if len(sys.argv) == 2:
+            usage()
+        else:
+            if sys.argv[2] == 'save':
+                help_save()
+            elif sys.argv[2] == 'list':
+                help_list()
+            elif sys.argv[2] == 'edit':
+                help_edit()
+            elif sys.argv[2] == 'delete':
+                help_delete()
+            elif sys.argv[2] == 'reset-data':
+                help_reset_data()
+            elif sys.argv[2] == 'report':
+                help_report()
+            elif sys.argv[2] == 'export':
+                help_export()
+            elif sys.argv[2] == 'import':
+                help_import()
+            elif sys.argv[2] == 'run':
+                help_run()
+            elif sys.argv[2] == 'monitor':
+                help_monitor()
+            else:
+                usage()
+        return 0
+
     if sys.argv[1] == 'save':
         return save_command(sys.argv[2:])
 
@@ -70,7 +98,7 @@ def save_command(argv):
         opts, args = getopt.getopt(argv,
                 # Standard connection related options
                 "d:h:p:U:", [
-                'dbname=', 'host=', 'port=', 'user=',
+                'dbname=', 'host=', 'port=', 'user=', 'help',
                 # save command specific options
                 'name=', 'title=', 'desc=', 'description=', 'force', ])
     except Exception as err:
@@ -89,6 +117,9 @@ def save_command(argv):
             connoptions['port'] = int(val)
         elif opt in ['-U', '--user']:
             connoptions['user'] = val
+        elif opt in ['--help']:
+            help_save()
+            return 0
 
         elif opt in ['--name']:
             opt_name = val
@@ -158,7 +189,7 @@ def list_command(argv):
         opts, args = getopt.getopt(argv,
                 # Standard connection related options
                 "d:h:p:U:", [
-                'dbname=', 'host=', 'port=', 'user=',
+                'dbname=', 'host=', 'port=', 'user=', 'help',
                 # list command specific options (none at the moment)
                 ])
     except Exception as err:
@@ -177,6 +208,9 @@ def list_command(argv):
             connoptions['port'] = int(val)
         elif opt in ['-U', '--user']:
             connoptions['user'] = val
+        elif opt in ['--help']:
+            help_list()
+            return 0
 
     # ----
     # Get the list of saved data sets.
@@ -220,7 +254,7 @@ def edit_command(argv):
         opts, args = getopt.getopt(argv,
                 # Standard connection related options
                 "d:h:p:U:", [
-                'dbname=', 'host=', 'port=', 'user=',
+                'dbname=', 'host=', 'port=', 'user=', 'help',
                 # edit command specific coptions
                 'name=', ])
     except Exception as err:
@@ -239,6 +273,9 @@ def edit_command(argv):
             connoptions['port'] = int(val)
         elif opt in ['-U', '--user']:
             connoptions['user'] = val
+        elif opt in ['--help']:
+            help_edit()
+            return 0
 
         elif opt in ['--name']:
             opt_name = val
@@ -290,7 +327,7 @@ def delete_command(argv):
         opts, args = getopt.getopt(argv,
                 # Standard connection related options
                 "d:h:p:U:", [
-                'dbname=', 'host=', 'port=', 'user=',
+                'dbname=', 'host=', 'port=', 'user=', 'help',
                 # edit command specific coptions
                 'name=', ])
     except Exception as err:
@@ -309,6 +346,9 @@ def delete_command(argv):
             connoptions['port'] = int(val)
         elif opt in ['-U', '--user']:
             connoptions['user'] = val
+        elif opt in ['--help']:
+            help_delete()
+            return 0
 
         elif opt in ['--name']:
             opt_name = val
@@ -338,7 +378,7 @@ def reset_data_command(argv):
         opts, args = getopt.getopt(argv,
                 # Standard connection related options
                 "d:h:p:U:", [
-                'dbname=', 'host=', 'port=', 'user=',
+                'dbname=', 'host=', 'port=', 'user=', 'help',
                 # edit command specific coptions
                 ])
     except Exception as err:
@@ -357,6 +397,9 @@ def reset_data_command(argv):
             connoptions['port'] = int(val)
         elif opt in ['-U', '--user']:
             connoptions['user'] = val
+        elif opt in ['--help']:
+            help_reset_data()
+            return 0
 
     # ----
     # Delete the collected data from the pl_profiler_linestats_data
@@ -384,7 +427,7 @@ def report_command(argv):
         opts, args = getopt.getopt(argv,
                 # Standard connection related options
                 "d:h:o:p:U:", [
-                'dbname=', 'host=', 'port=', 'user=',
+                'dbname=', 'host=', 'port=', 'user=', 'help',
                 # report command specific options
                 'name=', 'title=', 'desc=', 'description=',
                 'output=', 'top=', 'from-data', ])
@@ -404,6 +447,9 @@ def report_command(argv):
             connoptions['port'] = int(val)
         elif opt in ['-U', '--user']:
             connoptions['user'] = val
+        elif opt in ['--help']:
+            help_report()
+            return 0
 
         elif opt in ['--name']:
             opt_name = val
@@ -486,10 +532,10 @@ def export_command(argv):
         opts, args = getopt.getopt(argv,
                 # Standard connection related options
                 "d:h:o:p:U:", [
-                'dbname=', 'host=', 'port=', 'user=',
+                'dbname=', 'host=', 'port=', 'user=', 'help',
                 # report command specific options
                 'all', 'name=', 'title=', 'desc=', 'description=',
-                'output=', 'from-data', ])
+                'edit', 'output=', 'from-data', ])
     except Exception as err:
         sys.stderr.write(str(err) + '\n')
         return 2
@@ -506,9 +552,14 @@ def export_command(argv):
             connoptions['port'] = int(val)
         elif opt in ['-U', '--user']:
             connoptions['user'] = val
+        elif opt in ['--help']:
+            help_export()
+            return 0
 
         elif opt in ['--all']:
             opt_all = True
+        elif opt in ['--edit']:
+            opt_edit = True
         elif opt in ['--name']:
             opt_name = val
         elif opt in ['--title']:
@@ -598,7 +649,7 @@ def import_command(argv):
         opts, args = getopt.getopt(argv,
                 # Standard connection related options
                 "d:f:h:p:U:", [
-                'dbname=', 'host=', 'port=', 'user=',
+                'dbname=', 'host=', 'port=', 'user=', 'help',
                 # report command specific options
                 'file=', 'edit', 'force', ])
     except Exception as err:
@@ -617,6 +668,9 @@ def import_command(argv):
             connoptions['port'] = int(val)
         elif opt in ['-U', '--user']:
             connoptions['user'] = val
+        elif opt in ['--help']:
+            help_import()
+            return 0
 
         elif opt in ['-f', '--file']:
             opt_file = val
@@ -680,7 +734,7 @@ def run_command(argv):
         opts, args = getopt.getopt(argv,
                 # Standard connection related options
                 "c:d:f:h:o:p:U:", [
-                'dbname=', 'host=', 'port=', 'user=',
+                'dbname=', 'host=', 'port=', 'user=', 'help',
                 # run command specific options
                 'name=', 'title=', 'desc=', 'description=',
                 'command=', 'file=',
@@ -701,6 +755,9 @@ def run_command(argv):
             connoptions['port'] = int(val)
         elif opt in ['-U', '--user']:
             connoptions['user'] = val
+        elif opt in ['--help']:
+            help_run()
+            return 0
 
         elif opt in ['--name']:
             opt_name = val
@@ -805,7 +862,7 @@ def monitor_command(argv):
         opts, args = getopt.getopt(argv,
                 # Standard connection related options
                 "d:h:p:U:", [
-                'dbname=', 'host=', 'port=', 'user=',
+                'dbname=', 'host=', 'port=', 'user=', 'help',
                 # monitor command specific options
                 'pid=', 'interval=', 'duration=', ])
     except Exception as err:
@@ -824,6 +881,9 @@ def monitor_command(argv):
             connoptions['port'] = int(val)
         elif opt in ['-U', '--user']:
             connoptions['user'] = val
+        elif opt in ['--help']:
+            help_monitor()
+            return 0
 
         elif opt in ('-p', '--pid', ):
             opt_pid = val
@@ -883,75 +943,332 @@ def usage():
     print """
 usage: plprofiler COMMAND [OPTIONS]
 
-plprofiler is a command line tool to manage and create reports of data
-sets, collected by the PostgreSQL plprofiler extension.
+    plprofiler is a command line tool to control the plprofiler extension
+    for PostgreSQL.
 
-The typical usage is to run a test with the plprofiler extension enabled
-and either calling pl_profiler_save_stats() in the relevant sessions or
-also have plprofiler.save_interval configured, and then run
+    The input of this utility are the call and execution statistics, the
+    plprofiler extension collects. The final output is an HTML report of
+    the statistics gathered. There are several ways to collect the data,
+    save the data permanently and even transport it from a production
+    system to a lab system for offline analysis.
 
-    plprofiler save --name="test1" --conninfo="dbname=mydb"
+    Use
 
-on the command line. This will save the collected data permanently into
-the pl_profiler_saved* tables and clear out the pl_profiler_*_data tables.
-After that the command
+        plprofiler COMMAND --help
 
-    plprofiler report --name="test1" --conninfo="dbname=mydb" \\
-                      --output="test1.html"
+    for detailed information about one of the commands below.
 
-will generate the file "test1.html" containing an analysis of the test
-run.
+GENERAL OPTIONS:
+
+    All commands implement the following command line options to specify
+    the target database:
+
+        -h, --host=HOST     The host name of the database server.
+
+        -p, --port=PORT     The PostgreSQL port number.
+
+        -U, --user=USER     The PostgreSQL user name to connect as.
+
+        -d, --dbname=DB     The PostgreSQL database name or the DSN.
+                            plprofiler currently uses psycopg2 to connect
+                            to the target database. Since that is based
+                            on libpq, all the above parameters can also
+                            be specified in this option with the usual
+                            conninfo string or URI formats.
+
+        --help              Print the command specific help information
+                            and exit.
+
+TERMS:
+
+    The following terms are used in the text below and the help output of
+    individual commands:
+
+    in-memory-data  The plprofiler extension collects run-time data in
+                    per-backend hashtables (in-memory). This data is only
+                    accessible in the current session and is lost when the
+                    session ends or the hash tables are explicitly reset.
+
+    collected-data  The plprofiler extension can copy the in-memory-data
+                    into global tables, to make the statistics available
+                    to other sessions. See the "monitor" command for
+                    details. This data relies on the local database's
+                    system catalog to resolve Oid values into object
+                    definitions.
+
+    saved-dataset   The in-memory-data as well as the collected-data can
+                    be turned into a named, saved dataset. These sets
+                    can be exported and imported onto other machines.
+                    The saved datasets are independent of the system
+                    catalog, so a report can be generated again later,
+                    even even on a different system.
+
 
 COMMANDS:
 
-    save        Save the data collected in the pl_profiler_*_data tables
-                as a set in the pl_profiler_saved* tables. OPTIONS are
+    run             Runs one or more SQL statements with the plprofiler
+                    extension enabled and creates a saved-dataset and/or
+                    an HTML report from the in-memory-data.
 
-                --conninfo="CONNINFO"
-                --name="SET_NAME"               # required
-                --title="TITLE"
-                --description="DESCRIPTION"
+    monitor         Monitors a running application for a requested time
+                    and creates a saved-dataset and/or an HTML report from
+                    the resulting collected-data.
 
-                If TITLE or DESCRIPTION are not specified, plprofiler
-                will launch an editor (configured in the $EDITOR
-                environment variable) to edit the data set information.
+    reset-data      Deletes the collected-data.
 
-    list        List the available data sets. OPTIONS are
+    save            Saves the current collected-data as a saved-dataset.
 
-                --conninfo="CONNINFO"
+    list            Lists the available saved-datasets.
 
-    edit        Edit the data set information. This command will launch
-                an editor to change the metadata for the data set, like
-                the TITLE, DESCRIPTION and other details. OPTIONS are
+    edit            Edits the metadata of one saved-dataset. The metadata
+                    is used in the generation of the HTML reports.
 
-                --conninfo="CONNINFO"
-                --name="SET_NAME"               # required
+    report          Generates an HTML report from either a saved-dataset
+                    or the collected-data.
 
-    delete      Permanently delete the saved set SET_NAME. No going
-                back from here ... got to re-run the test and collect
-                the data again.
+    delete          Deletes a saved-dataset.
 
-                --conninfo="CONNINFO"
-                --name="SET_NAME"               # required
+    export          Exports one or all saved-datasets into a JSON file.
 
-    report      Generates an HTML file containing an analysis of one
-                test data set. The HTML will contain and inline .SVG
-                visualizing call graphs and per source line statistics
-                of PL/pgSQL functions. OPTIONS are
+    import          Imports the saved-datasets from a JSON file, created
+                    with the export command.
 
-                --conninfo="CONNINFO"
-                --name="SET_NAME"               # required
-                --top=NUM                       # number of functions
-                                                # to analyze (default=10)
+"""
 
-                The "top" functions to analyze are determined by the
-                sum of their execution time from the plprofiler func_beg
-                to func_end callback.
+def help_run():
+    print """
+usage: plprofiler run [OPTIONS]
 
-                An optional list of OID values as command line arguments
-                will override the --top option and generate a report
-                with those functions detailed only. The functions OIDs
-                of interest can be determined from the function call
-                graph .SVG at the beginning of the report.
+    Runs one or more SQL commands (hopefully invoking one or more PL/pgSQL
+    functions and/or triggers), then turns the in-memory-data into an HTML
+    report and/or a saved-dataset.
+
+OPTIONS:
+
+    --name=NAME     The name of the data set to use in the HTML report or
+                    saved-dataset.
+
+    --title=TITLE   Ditto.
+
+    --desc=DESC     Ditto.
+
+    -c, --command=CMD   The SQL string to execute. Can be multiple SQL
+                    commands, separated by semicolon.
+
+    -f, --file=FILE Read SQL commands to execute from FILE.
+
+    --save          Create a saved-dataset.
+
+    --force         Overwrite an existing saved-dataset of the same NAME.
+
+    --output=FILE   Save an HTML report in FILE.
+
+    --top=N         Include up to N function detail descriptions in the
+                    report (default=10).
+
+"""
+
+def help_monitor():
+    print """
+usage: plprofiler monitor [OPTIONS]
+
+    Turns profile data capturing and periodic saving on of either all
+    database backends, or a single one (specified by PID), waits for a
+    specified amount of time, then turns it back off. If during that
+    time the application (or specific backend) is executing queries, that
+    invoke PL/pgSQL functions, profile statistics will be saved
+    at the specified interval.
+
+    The resulting collected-data can be used with the "save" and "report"
+    commands and cleared with "reset-data".
+
+NOTES:
+
+    The change in configuration options will become visible to running
+    backends when they go through the PostgreSQL TCOP loop. That is, when
+    they receive the next "client" command, like a query or prepared
+    statement execution request. They will not start/stop collecting
+    data while they are in the middle of a long-running query.
+
+    Unless the pl_profiler_*_data tables have been configured as
+    foreign data wrappers, pointing back to the monitored database, any
+    rollback operations may lead to partial loss of profiling statistics.
+
+    The periodic saving is only performed when the save-interval has
+    elapsed AND the plprofiler plugin callback at function exit is
+    called by the PL/pgSQL executor. That means that the last "interval"
+    seconds of statistics are usually not copied into the collected-data.
+
+REQUIREMENTS:
+
+    This command uses PostgreSQL features, that are only available in
+    version 9.4 and higher.
+
+    The plprofiler extension must be loaded via the configuration option
+    "shared_preload_libraries" in the postgresql.conf file.
+
+    The application user(s) must have INSERT permission on the plprofiler
+    extension's tables
+
+        pl_profiler_linestats_data and
+        pl_profiler_callgraph_data
+
+OPTIONS:
+
+    --pid=PID       The PID of the backend, to monitor. If not given, the
+                    entire PostgreSQL instance will be suspect to monitoring.
+
+    --interval=SEC  Interval in seconds at which the monitored backend(s)
+                    will copy the in-memory-data to collected-data and then
+                    reset their in-memory-data.
+
+    --duration=SEC  Duration of the monitoring run in seconds.
+
+"""
+
+def help_reset_data():
+    print """
+usage: plprofiler reset-data
+
+    Deletes all data from the collected-data tables.
+
+    This does NOT destroy any of the saved-datasets.
+
+"""
+
+def help_save():
+    print """
+usage: plprofiler save [OPTIONS]
+
+    The save command is used to create a saved-dataset from collected-data.
+    Saved datasets are independent from the system catalog, since all their
+    Oid based information has been resolved into textual object descriptions.
+    Their reports can be recreated later or even on another system (after
+    transport via export/import).
+
+OPTIONS:
+
+    --name=NAME     The name of the saved-dataset. Must be unique.
+
+    --title=TITLE   The title used by the report command in the <title>
+                    tag of the generated HTML output.
+
+    --desc=DESC     An HTML formatted paragraph (or more) that describes
+                    the profiling report.
+
+    --force         Overwite an existing saved-dataset with the same NAME.
+
+NOTES:
+
+    If the options for TITLE and DESC are not specified on the command line,
+    the save command will launch an editor, allowing to edit the default
+    report configuration. This metadata can later be changed with the
+    "edit" command.
+
+"""
+
+def help_list():
+    print """
+usage: plprofiler list
+
+    Lists the available saved-datasets together with their TITLE.
+
+"""
+
+def help_edit():
+    print """
+usage: plprofiler edit [OPTIONS]
+
+    Launches an editor with the metadata of the specified saved-dataset.
+    This allows to change not only the metadata itself, but also the
+    NAME of the saved-dataaset.
+
+OPTIONS:
+
+    --name=NAME     The name of the saved-dataset to edit.
+
+"""
+
+def help_report():
+    print """
+usage: plprofiler report [OPTIONS]
+
+    Create an HTML report from either collected-data or a saved-dataset.
+
+OPTIONS:
+
+    --from-data     Use the collected-data rather than a saved-dataset.
+
+    --name=NAME     The name of the saved-dataset to load or the NAME
+                    to use with --from-data.
+
+    --title=TITLE   Override the TITLE found in the saved-dataset's
+                    metadata, or the TITLE to use with --from-data.
+
+    --desc=DESC     Override the DESC found in the saved-dataset's
+                    metadata, or the DESC to use with --from-data.
+
+    --output=FILE   Destination for the HTML report (default=stdout).
+
+    --top=N         Include up to N function detail descriptions in the
+                    report (default=10).
+
+"""
+
+def help_delete():
+    print """
+usage: plprofiler delete [OPTIONS]
+
+    Delete the named saved-dataset.
+
+OPTIONS:
+
+    --name=NAME     The name of the saved-dataset to delete.
+
+"""
+
+def help_export():
+    print """
+usage: plprofiler export [OPTIONS]
+
+    Export the collected-data or one or more saved-datasets as a JSON
+    document.
+
+OPTIONS:
+
+    --all           Export all saved-datasets.
+
+    --from-data     Export the collected-data instead of a saved-dataset.
+
+    --name=NAME     The NAME of the dataset to save.
+
+    --title=TITLE   The TITLE of the dataset in the export.
+
+    --desc=DESC     The DESC of the dataset in the export.
+
+    --edit          Launches the config editor for each dataset, included
+                    in the export.
+
+    --output=FILE   Save the JSON export data in FILE (default=stdout).
+
+"""
+
+def help_import():
+    print """
+usage: plprofiler import [OPTIONS]
+
+    Imports one or more datasets from an export file.
+
+OPTIONS:
+
+    -f, --file=FILE Read the profile data from FILE. This should be the
+                    output of a previous "export" command.
+
+    --edit          Edit each dataset's metadata before storing it as
+                    a saved-dataset.
+
+    --force         Overwrite any existing saved-datasets with the same
+                    NAMEs, as they appear in the input file (or after
+                    editing).
 
 """
