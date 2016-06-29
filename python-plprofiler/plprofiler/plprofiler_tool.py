@@ -31,6 +31,9 @@ def main():
     if sys.argv[1] == 'delete':
         return delete_command(sys.argv[2:])
 
+    if sys.argv[1] == 'reset-data':
+        return reset_data_command(sys.argv[2:])
+
     if sys.argv[1] == 'report':
         return report_command(sys.argv[2:])
 
@@ -321,6 +324,48 @@ def delete_command(argv):
         plp = plprofiler()
         plp.connect(connoptions)
         plp.delete_dataset(opt_name)
+    except Exception as err:
+        sys.stderr.write(str(err) + '\n')
+        return 1
+
+def reset_data_command(argv):
+    connoptions = {}
+
+    # ----
+    # Parse command line
+    # ----
+    try:
+        opts, args = getopt.getopt(argv,
+                # Standard connection related options
+                "d:h:p:U:", [
+                'dbname=', 'host=', 'port=', 'user=',
+                # edit command specific coptions
+                ])
+    except Exception as err:
+        sys.stderr.write(str(err) + '\n')
+        return 1
+
+    for opt, val in opts:
+        if opt in ['-d', '--dbname']:
+            if val.find('=') < 0:
+                connoptions['database'] = val
+            else:
+                connoptions['dsn'] = val
+        elif opt in ['-h', '--host']:
+            connoptions['host'] = val
+        elif opt in ['-p', '--port']:
+            connoptions['port'] = int(val)
+        elif opt in ['-U', '--user']:
+            connoptions['user'] = val
+
+    # ----
+    # Delete the collected data from the pl_profiler_linestats_data
+    # and pl_profiler_callgraph_data tables.
+    # ----
+    try:
+        plp = plprofiler()
+        plp.connect(connoptions)
+        plp.reset_data()
     except Exception as err:
         sys.stderr.write(str(err) + '\n')
         return 1
