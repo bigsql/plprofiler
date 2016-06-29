@@ -6,7 +6,6 @@ The **plprofiler** is an extension for the PostgreSQL database system to create 
 1. [Overview](#markdown-header-overview)
 2. [Installation](doc/installation.md)
 3. [Examples](doc/examples.md)
-    1. [Executing SQL using the plprofiler utility](doc/examples.md#markdown-header-executing-sql-using-the-profiler-utility)
 
 Overview
 --------
