@@ -263,4 +263,6 @@ tps = 3620.469364 (including connections establishing)
 tps = 3620.869051 (excluding connections establishing)
 ```
 
-This is almost a factor 22 speedup in return for a single CREATE INDEX.
+This is a performance boost by factor 27 for one additional index.
+
+Not all performance problems are this easy to solve. But I hope the **plprofiler** will help you locating them quickly, so you have more time fixing them.
