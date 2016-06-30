@@ -225,15 +225,42 @@ The `plprofiler monitor` command is using `ALTER SYSTEM ...` and `SELECT pg_relo
 
 Leaving out the --pid option will cause ALL active backends to save their stats at the specified interval.
 
-Since this time we were only capturing profiling data from one out of 24 backends, the total number of data rows colleted over 5 minutes is 731. But since they are the result of 10 second interval summaries, they are just as accurate as the previous example.
+Since this time we were only capturing profiling data from one out of 24 backends, the total number of data rows colleted over 5 minutes is 731. But since they are the result of 10 second interval summaries, they are just as accurate as the previous example. Again I am not including the actual **plprofiler** output because it is again just a repetition of what we already know.
 
 Fixing the performance problem
 ------------------------------
 
-The final chapter in this tutorial is to fix the artificially introduced performance problem as it was done in the real world case that stood model for it. We create the missing index.
+In this final chapter of this tutorial we fix the artificially introduced performance problem as it was done in the real world case that stood model for it. We create the missing index.
 
 ```
 CREATE INDEX pgbench_accounts_aid_idx ON pgbench_accounts (aid);
 ```
 
+With that in place we use our last method of capturing profiling data once more to generate the last report for this tutorial.
 
+```
+plprofiler reset-data
+plprofiler monitor --pid <PID> --interval 10 --duration 300
+plprofiler report --from-data --name tpcb-problem-fixed --output tpcb-problem-fixed.html
+```
+[ ![tpcb-problem-fixed.hmtl](images/tpcb-problem-fixed.png) ](http://wi3ck.info/plprofiler/doc/tpcb-problem-fixed.html)
+[`doc/tpcb-problem-fixed.html`](http://wi3ck.info/plprofiler/doc/tpcb-problem-fixed.html)
+
+The performance profile is now completely reversed. The access to pgbench_accounts is a small fraction (1.52% with 0.44% out of that accouting for fetching the new account balance) of the overall time spent. The access to pgbench_tellers and pgbench_branches completely dominates the picture. This is how a pgbench running inside of shared buffer is supposed to look like. Because the tellers and branches tables are so small, there is tremendous row level lock contention and constant bloat on them.
+
+The overall performance of pgbench went from the original 136 TPS to a whooping 
+
+```
+transaction type: Custom query
+scaling factor: 1
+query mode: simple
+number of clients: 24
+number of threads: 24
+duration: 300 s
+number of transactions actually processed: 1086292
+latency average: 6.628 ms
+tps = 3620.469364 (including connections establishing)
+tps = 3620.869051 (excluding connections establishing)
+```
+
+This is almost a factor 22 speedup in return for a single CREATE INDEX.
