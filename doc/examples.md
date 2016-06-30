@@ -3,6 +3,8 @@ PL Profiler Examples
 
 In this tutorial style set of examples, I mostly want to demonstrate the different ways, **plprofiler** allows to capture profiling data.
 
+The examples are built on top of each other so it is best to at least once read over this document top to bottom.
+
 It is assumed that anyone, interested in profiling complex PL/pgSQL code, is familiar with performance testing in general and performance testing of a PostgreSQL database in particular. Therefore it is also also assumed that the reader has a basic understanding of the pgbench utility.
 
 The example test case
@@ -10,15 +12,15 @@ The example test case
 
 All examples in this documentation are based on a modified pgbench database. The modifications are:
 
-* The SQL queries, that make up the TPC-B style business transaction of pgbench, have been implemented in a set of PL/pgSQL functions. Each function essentially performs only one of the TPC-B queries. This is on purpose convoluted, since for demonstration purposes we want a simple, yet nested example. The function definitions can be found in [`examples/pgbench_pl.sql`](../examples/pgbench_pl.sql).
-* A custom pgbench, found in [`examples/pgbench_pl.profile`](../examples/pgbench_pl.profile), is used with the -f option when invoking pgbench. 
+* The SQL queries, that make up the TPC-B style business transaction of pgbench, have been implemented in a set of PL/pgSQL functions. Each function essentially performs only one of the TPC-B queries. This is on purpose convoluted, since for the sake of demonstration we want a simple, yet nested example. The function definitions can be found in [`examples/pgbench_pl.sql`](../examples/pgbench_pl.sql).
+* A custom pgbench profile, found in [`examples/pgbench_pl.profile`](../examples/pgbench_pl.profile), is used with the -f option when invoking pgbench. 
 * The table pgbench_accounts is modified.
     * The filler column is expanded and filled with 500 characters of data.
     * A new column, `category interger` is added in front of the aid and made part of the primary key.
 	
-The modifications to the pgbench_accounts table are based on a real world case, encountered in a customer database. This pgbench example case of course is greatly simplified. In the real world case the access to the table in question was in a nested function, 8 call levels deep, the table had several indexes to choose from and the schema contained a total of >500 PL/pgSQL functions with >100,000 lines of PL code. A needle in what once was a haystack, but had been eaten by an elephant.
+The modifications to the pgbench_accounts table are based on a real world case, encountered in a customer database. This pgbench example case of course is greatly simplified. In the real world case the access to the table in question was in a nested function, 8 call levels deep, the table had several indexes to choose from and the schema contained a total of >500 PL/pgSQL functions with >100,000 lines of PL code. In other words the author was looking for a needle in what once was a haystack, but had been eaten by an elephant.
 
-Despite the simplification, the problem, produced by these modifications, still simulates the original case surprisingly well. The TPC-B transaction accesses the pgbench_accounts table based on the aid column alone, so that is the only key part, available in the WHERE clause. However, since the table rows are now >500 bytes wide and the index is rather small, compared to the heap, the PostgreSQL query optimizer will still choose an index scan. This is the right choice, based on the available options, because a sequential scan would be far worse.
+Despite the simplification, the problem produced by these modifications simulates the original case surprisingly well. The TPC-B transaction accesses the pgbench_accounts table based on the aid column alone, so that is the only key part, available in the WHERE clause. However, since the table rows are now >500 bytes wide and the index is rather small, compared to the heap, the PostgreSQL query optimizer will still choose an index scan. This is the right choice, based on the available options, because a sequential scan would be worse.
 
 ```
 pgbench_plprofiler=# explain select abalance from pgbench_accounts where aid = 1;
@@ -28,7 +30,7 @@ pgbench_plprofiler=# explain select abalance from pgbench_accounts where aid = 1
    Index Cond: (aid = 1)
 ```
 
-Since the first column of the index is not part of the WHERE clause and thus, the index condition, this results in a full scan of the entire index! Unfortunately that detail is nowhere visible except in this explain output. If we look at pg_stat_* tables after a benchmark run for example, they only tell us that all access to pgbench_accounts was done via index scans over the primary key and that all those scans returned a single row. One would normally think "nothing wrong here".
+Since the first column of the index is not part of the WHERE clause and thus, the index condition, this results in a full scan of the entire index! Unfortunately that detail is nowhere visible except in this explain output. And then you will only notice it if you know the definition of that index. If we look at pg_stat_* tables after a benchmark run for example, they only tell us that all access to pgbench_accounts was done via index scans over the primary key and that all those scans returned a single row. One would normally think "nothing wrong here".
 
 On top of that, since the queries accessing the table will never show up in any statistics, we will never see that each of them takes 30ms already on a 10x pgbench scaling factor. Imagine what that turns into when we scale out.
 
@@ -178,7 +180,89 @@ SELECT tpcb(:aid, :bid, :tid, :delta);
 
 I am not showing the resulting report for that because it is almost identical to the previous one. However, the collected-data in the global tables shrunk from almost a million rows to undere 20,000. Also, our performance is back up to 135 TPS.
 
-Profiling without changing the application
-------------------------------------------
+Saving statistics via ALTER USER
+--------------------------------
 
+The above can also be done without changing the application code at all. Instead we can add the **plprofiler** to the `postgresql.conf` file in
 
+`shared_preload_libraries = 'plprofiler'`
+
+(requires PostgreSQL server restart) and then configure the application user as follows:
+
+```
+ALTER USER myuser SET plprofiler.enabled TO on;
+ALTER USER myuser SET plprofiler.save_interval TO 10;
+```
+
+This has the exact same effect as the last example. It of course requires that the application reconnects after the `ALTER USER ...` statements to start collecting data, and it better reconnect once more when we are done profiling and did the corresponding `ALTER USER ... RESET ...` commands. So this is still not suitable for profiling a live production system since it is too disruptive.
+
+Profiling a live production system
+----------------------------------
+
+#### Debugging as well as profiling on a production system is a risky business and should be avoided if at all possible.
+
+Unfortunately sometimes it is not avoidable. For that reason, **plprofiler** has options designed to minimize its impact on performance.
+
+Like the previous example, the profiling method demonstrated below requires to have **plprofiler** pre-loaded from the `postgresql.conf` file.
+
+`shared_preload_libraries = 'plprofiler'`
+
+This by itself is not a problem. The **plprofiler** will be loaded and place all callback functions into the PL instrumentation hooks. The first thing all these functions do is to check if profiling is enabled. If nothing is enabled, this check amounts to evaluating an
+
+    `if (!bool_var && int_var != ptr->int_var) return;`
+
+at the beginning of all the callback functions. One of the callback functions is called at every function enter/exit and at every PL statement start/end (only the statements, that actually have runtime functionality). In the great scheme of things, this overhead is negligible.
+
+With `shared_preload_libraries` configured (and the database server restarted to let that take effect) and the collected-data tables empty (run `plprofiler reset-data`) we launch `pgbench` in the background and verify that no statistics are being collected in `pl_profiler_linestats_data` and `pl_profiler_callgraph_data`. After a while we get one of the pgbench backend PIDs by examining the system view `pg_stat_activity`. With that PID we run
+
+```
+plprofiler reset-data
+plprofiler monitor --pid <PID> --interval 10 --duration 300
+plprofiler report --from-data --name tpcb-using-monitor --output tpcb-using-monitor.html
+```
+
+The `plprofiler monitor` command is using `ALTER SYSTEM ...` and `SELECT pg_reload_conf()` to enable profiling and turn it back off after the specified duration. This obviously will only work with a PostgreSQL database version 9.4 or newer. As with any database maintenance operations, this should only be done in a connection loss safe environment as losing the connection in the middle of the monitoring would leave those settings behind permanently.
+
+Leaving out the --pid option will cause ALL active backends to save their stats at the specified interval.
+
+Since this time we were only capturing profiling data from one out of 24 backends, the total number of data rows colleted over 5 minutes is 731. But since they are the result of 10 second interval summaries, they are just as accurate as the previous example. Again I am not including the actual **plprofiler** output because it is again just a repetition of what we already know.
+
+Fixing the performance problem
+------------------------------
+
+In this final chapter of this tutorial we fix the artificially introduced performance problem as it was done in the real world case that stood model for it. We create the missing index.
+
+```
+CREATE INDEX pgbench_accounts_aid_idx ON pgbench_accounts (aid);
+```
+
+With that in place we use our last method of capturing profiling data once more to generate the last report for this tutorial.
+
+```
+plprofiler reset-data
+plprofiler monitor --pid <PID> --interval 10 --duration 300
+plprofiler report --from-data --name tpcb-problem-fixed --output tpcb-problem-fixed.html
+```
+[ ![tpcb-problem-fixed.hmtl](images/tpcb-problem-fixed.png) ](http://wi3ck.info/plprofiler/doc/tpcb-problem-fixed.html)
+[`doc/tpcb-problem-fixed.html`](http://wi3ck.info/plprofiler/doc/tpcb-problem-fixed.html)
+
+The performance profile is now completely reversed. The access to pgbench_accounts is a small fraction (1.52% with 0.44% out of that accouting for fetching the new account balance) of the overall time spent. The access to pgbench_tellers and pgbench_branches completely dominates the picture. This is how a pgbench running inside of shared buffer is supposed to look like. Because the tellers and branches tables are so small, there is tremendous row level lock contention and constant bloat on them.
+
+The overall performance of pgbench went from the original 136 TPS to a whooping 
+
+```
+transaction type: Custom query
+scaling factor: 1
+query mode: simple
+number of clients: 24
+number of threads: 24
+duration: 300 s
+number of transactions actually processed: 1086292
+latency average: 6.628 ms
+tps = 3620.469364 (including connections establishing)
+tps = 3620.869051 (excluding connections establishing)
+```
+
+This is a performance boost by factor 27 for one additional index.
+
+Not all performance problems are this easy to solve. But I hope the **plprofiler** will help you locating them quickly, so you have more time fixing them.
