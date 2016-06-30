@@ -309,13 +309,6 @@ profiler_init(PLpgSQL_execstate *estate, PLpgSQL_function *func )
 	profilerCtx	   *profilerInfo;
 	char		   *procSrc;
 
-	/*
-	 * Anonymous code blocks do not have function source code
-	 * that we can lookup in pg_proc. For now we ignore them.
-	 */
-	if (func->fn_oid == InvalidOid)
-		return;
-
 	if (!profiler_enabled && MyProcPid != profiler_enable_pid)
 	{
 		/*
@@ -335,6 +328,13 @@ profiler_init(PLpgSQL_execstate *estate, PLpgSQL_function *func )
 		}
 		return;
 	}
+
+	/*
+	 * Anonymous code blocks do not have function source code
+	 * that we can lookup in pg_proc. For now we ignore them.
+	 */
+	if (func->fn_oid == InvalidOid)
+		return;
 
 	/*
 	 * The PL/pgSQL interpreter provides a void pointer (in each stack frame)
@@ -373,11 +373,11 @@ profiler_func_beg(PLpgSQL_execstate *estate, PLpgSQL_function *func)
 {
 	TransactionId	current_xid;
 
-	/* Ignore anonymous code block. */
-	if (estate->plugin_info == NULL)
+	if (!profiler_enabled && MyProcPid != profiler_enable_pid)
 		return;
 
-	if (!profiler_enabled && MyProcPid != profiler_enable_pid)
+	/* Ignore anonymous code block. */
+	if (estate->plugin_info == NULL)
 		return;
 
 	/*
@@ -421,11 +421,11 @@ profiler_func_end(PLpgSQL_execstate *estate, PLpgSQL_function *func)
 	lineHashKey		key;
 	lineEntry	   *entry;
 
-	/* Ignore anonymous code block. */
-	if (estate->plugin_info == NULL)
+	if (!profiler_enabled && MyProcPid != profiler_enable_pid)
 		return;
 
-	if (!profiler_enabled && MyProcPid != profiler_enable_pid)
+	/* Ignore anonymous code block. */
+	if (estate->plugin_info == NULL)
 		return;
 
 	if (!line_stats)
@@ -502,11 +502,11 @@ profiler_stmt_beg(PLpgSQL_execstate *estate, PLpgSQL_stmt *stmt)
 	stmt_stats	   *stats;
 	profilerCtx	   *profilerInfo;
 
-	/* Ignore anonymous code block. */
-	if (estate->plugin_info == NULL)
+	if (!profiler_enabled && MyProcPid != profiler_enable_pid)
 		return;
 
-	if (!profiler_enabled && MyProcPid != profiler_enable_pid)
+	/* Ignore anonymous code block. */
+	if (estate->plugin_info == NULL)
 		return;
 
 	profilerInfo = (profilerCtx *)estate->plugin_info;
@@ -538,11 +538,11 @@ profiler_stmt_end(PLpgSQL_execstate *estate, PLpgSQL_stmt *stmt)
 	instr_time		end_time;
 	uint64			elapsed;
 
-	/* Ignore anonymous code block. */
-	if (estate->plugin_info == NULL)
+	if (!profiler_enabled && MyProcPid != profiler_enable_pid)
 		return;
 
-	if (!profiler_enabled && MyProcPid != profiler_enable_pid)
+	/* Ignore anonymous code block. */
+	if (estate->plugin_info == NULL)
 		return;
 
 	INSTR_TIME_SET_CURRENT(end_time);
