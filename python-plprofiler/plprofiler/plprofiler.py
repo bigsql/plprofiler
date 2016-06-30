@@ -386,8 +386,11 @@ class plprofiler:
         # all of it once and cache it in a hash table.
         # ----
         linestats = {}
-        cur.execute("""SELECT L.func_oid, L.line_number, L.exec_count,
-                            L.total_time, L.longest_time, S.source
+        cur.execute("""SELECT L.func_oid, L.line_number,
+                            sum(L.exec_count)::bigint AS exec_count,
+                            sum(L.total_time)::bigint AS total_time,
+                            max(L.longest_time)::bigint AS longest_time,
+                            S.source
                         FROM pl_profiler_linestats_data L
                         JOIN pl_profiler_funcs_source(ARRAY(
                                     SELECT DISTINCT func_oid
@@ -395,6 +398,7 @@ class plprofiler:
                                 )) S
                             ON S.func_oid = L.func_oid
                             AND S.line_number = L.line_number
+                        GROUP BY L.func_oid, L.line_number, S.source
                         ORDER BY L.func_oid, L.line_number""")
         for row in cur:
             if row[0] not in linestats:
@@ -552,12 +556,16 @@ class plprofiler:
         # all of it once and cache it in a hash table.
         # ----
         linestats = {}
-        cur.execute("""SELECT L.func_oid, L.line_number, L.exec_count,
-                            L.total_time, L.longest_time, S.source
+        cur.execute("""SELECT L.func_oid, L.line_number,
+                            sum(L.exec_count)::bigint AS exec_count,
+                            sum(L.total_time)::bigint AS total_time,
+                            max(L.longest_time)::bigint AS longest_time,
+                            S.source
                         FROM pl_profiler_linestats(false) L
                         JOIN pl_profiler_funcs_source(pl_profiler_func_oids_current()) S
                             ON S.func_oid = L.func_oid
                             AND S.line_number = L.line_number
+                        GROUP BY L.func_oid, L.line_number, S.source
                         ORDER BY L.func_oid, L.line_number""")
         for row in cur:
             if row[0] not in linestats:
@@ -874,8 +882,8 @@ class plprofiler:
     def reset_data(self):
         cur = self.dbconn.cursor()
         cur.execute("""SET search_path TO %s""", (self.profiler_namespace, ))
-        cur.execute("""DELETE FROM pl_profiler_linestats_data""")
-        cur.execute("""DELETE FROM pl_profiler_callgraph_data""")
+        cur.execute("""TRUNCATE pl_profiler_linestats_data""")
+        cur.execute("""TRUNCATE pl_profiler_callgraph_data""")
         cur.execute("""RESET search_path""")
         self.dbconn.commit()
         cur.close()
