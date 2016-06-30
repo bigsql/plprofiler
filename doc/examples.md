@@ -10,8 +10,8 @@ The example test case
 
 All examples in this documentation are based on a modified pgbench database. The modifications are:
 
-* The SQL queries, that make up the TPC-B style business transaction of pgbench, have been implemented in a set of PL/pgSQL functions. Each function essentially performs only one of the TPC-B queries. This is on purpose convoluted, since for demonstration purposes we want a simple, yet nested example. The function definitions can be found in [examples/pgbench_pl.sql](../examples/pgbench_pl.sql).
-* A custom pgbench, found in [examples/pgbench_pl.profile](../examples/pgbench_pl.profile), is used with the -f option when invoking pgbench. 
+* The SQL queries, that make up the TPC-B style business transaction of pgbench, have been implemented in a set of PL/pgSQL functions. Each function essentially performs only one of the TPC-B queries. This is on purpose convoluted, since for demonstration purposes we want a simple, yet nested example. The function definitions can be found in [`examples/pgbench_pl.sql`](../examples/pgbench_pl.sql).
+* A custom pgbench, found in [`examples/pgbench_pl.profile`](../examples/pgbench_pl.profile), is used with the -f option when invoking pgbench. 
 * The table pgbench_accounts is modified.
     * The filler column is expanded and filled with 500 characters of data.
     * A new column, `category interger` is added in front of the aid and made part of the primary key.
@@ -32,10 +32,28 @@ Since the first column of the index is not part of the WHERE clause and thus, th
 
 On top of that, since the queries accessing the table will never show up in any statistics, we will never see that each of them takes 30ms already on a 10x pgbench scaling factor. Imagine what that turns into when we scale out.
 
-The full script to prepare the pgbench test database is found [here](../examples/prepdb.sh).
+The full script to prepare the pgbench test database is found in [`examples/prepdb.sh`](../examples/prepdb.sh).
 
-General command syntax and options
-----------------------------------
+To get a performance baseline, the median result of 5 times 5 minutes pgbench with 24 clients reports 136 TPS on an 8-core machine with 32GB of RAM and the entire database fitting into the 8GB of shared buffers (yeah, it is that bad).
+
+```
+(venv)[wieck@localhost examples]$ pgbench -n -c24 -j24 -T300 -f pgbench_pl.profile
+transaction type: Custom query
+scaling factor: 1
+query mode: simple
+number of clients: 24
+number of threads: 24
+duration: 300 s
+number of transactions actually processed: 40686
+latency average: 176.965 ms
+tps = 135.580039 (including connections establishing)
+tps = 135.589426 (excluding connections establishing)
+```
+
+Time to create a profile.
+
+General command syntax
+----------------------
 
 The general syntax of the plprofiler utility is
 
@@ -50,7 +68,9 @@ Option                | Description
 `-U, --user=USER`     | The database user name.
 `-d, --dbname=DB`     | The database name, conninfo string or URI.
 
-In the examples below it is assumed that the environment variables `PGHOST`, `PGPORT`, `PGUSER` and `PGDATABASE` have all been set to point to the pgbench_plprofiler database, that was created using the [examples/prepdb.sh](../examples/prepdb.sh) script. The above connection parameters are left out to make the examples more readable. For security reasons, there is not way to specify a password on the command line. Please create the necessary `~/.pgpass` entry if your database requires password authentication.
+`plprofiler help [COMMAND]` will show you more details than are explained in the examples, provided in this document.
+
+In the examples below it is assumed that the environment variables `PGHOST`, `PGPORT`, `PGUSER` and `PGDATABASE` have all been set to point to the pgbench_plprofiler database, that was created using the [`examples/prepdb.sh`](../examples/prepdb.sh) script. The above connection parameters are left out to make the examples more readable. For security reasons, there is not way to specify a password on the command line. Please create the necessary `~/.pgpass` entry if your database requires password authentication.
 
 Executing SQL using the plprofiler utility
 ------------------------------------------
@@ -63,20 +83,21 @@ Since not all information for the HTML report was actually specified on the comm
 
 One thing to keep in mind about this style of profiling is that there is a significant overhead in PL/pgSQL on the first call to a function within a database session (connection). The PL/pgSQL function call handler must parse the entire function definition and create a saved PL execution tree for it. Certain types of SQL statements will also be parsed and verified. For these reasons calling a truly trivial PL/pgSQL example like this can give very misleading results. 
 
-To avoid this, the function should be called several times in a row. The file [examples/tpcb_queries.sql](../examples/tpcb_queries.sql) contains a set of 20 calls to the `tpcb()` function and can be executed as
+To avoid this, the function should be called several times in a row. The file [`examples/tpcb_queries.sql`](../examples/tpcb_queries.sql) contains a set of 20 calls to the `tpcb()` function and can be executed as
 
 `plprofiler run --file tpcb_queries.sql --output tpcb-test1.html`
 
 Analyzing the first profile
 ---------------------------
 
-The report generated by the last `plprofiler` command (the one with the --file option used) should look roughly like [this](http://wi3ck.info/plprofiler/doc/tpcb-test1.html) (I narrowed the SVG FlameGraph from the default width of 1200 pixels to 800 to play nicer with embedding into markdown on bitbucket) and I set the tabstop to 4, which is how the SQL file for the PL functions is formatted:
+The report generated by the last `plprofiler` command (the one with the --file option used) should look roughly like this (I narrowed the SVG FlameGraph from the default width of 1200 pixels to 800 to play nicer with embedding into markdown on bitbucket) and I set the tabstop to 4, which is how the SQL file for the PL functions is formatted:
 
 [ ![tpcb-test1.hmtl](images/tpcb-test1.png) ](http://wi3ck.info/plprofiler/doc/tpcb-test1.html)
+[`doc/tpcb-test1.html`](http://wi3ck.info/plprofiler/doc/tpcb-test1.html)
 
 Go ahead and open the actual HTML version in a separate window or tab to be able to interact with it.
 
-What sticks out at the top of the FlameGraph are the two functions `tpcb_fetch_abalance()` and its caller, `tpcb_upd_accounts()`. When you hover with your cursor over the FlameGraph entry for `tpcb_upd_accounts()` you will see that it actually accounted for 99.23% of the total execution time, spent inside of PL/pgSQL functions.
+What sticks out at the top of the FlameGraph are the two functions `tpcb_fetch_abalance()` and its caller, `tpcb_upd_accounts()`. When you hover over the FlameGraph entry for `tpcb_upd_accounts()` you will see that it actually accounted for over 99% of the total execution time, spent inside of PL/pgSQL functions.
 
 To examine this function closer we scroll down in the report to the details of `tpcb_upd_accounts()` and click on the **(show)** link, we can see the source code of the function and the execution time spent in every single line of it.
 
@@ -95,7 +116,7 @@ We're not going to fix the actual problem (missing/wrong index) just yet, but ex
 Capturing profiling data by instrumenting the application
 ---------------------------------------------------------
 
-Sometimes it may be easier to add instrumentation calls to the application, than to extract stand alone queries, that can be run by the **plprofiler** via the --command or --file options. The way to do this is to add some **plprofiler** function calls at strategic places in the application code. In the case of pgbench, this *application code* is the custom profile.
+Sometimes it may be easier to add instrumentation calls to the application, than to extract stand alone queries, that can be run by the **plprofiler** via the --command or --file options. The way to do this is to add some **plprofiler** function calls at strategic places in the application code. In the case of pgbench, this *application code* is the custom profile [`pgbench_pl.collect.profile`](../examples/pgbench_pl.collect.profile).
 
 ```
 \set nbranches :scale
@@ -108,6 +129,7 @@ Sometimes it may be easier to add instrumentation calls to the application, than
 SELECT pl_profiler_enable(true);
 SELECT tpcb(:aid, :bid, :tid, :delta);
 SELECT pl_profiler_collect_data();
+SELECT pl_profiler_enable(false);
 ```
 
 The **plprofiler** extension creates several global tables in the schema, it is installed in. The two important ones (for now) are `pl_profiler_linestats_data` and `pl_profiler_callgraph_data`. In order to use this profiling method you need to be able to GRANT the application user(s) INSERT permission to these two tables. Since they are owned by default by a database superuser, you must be one too to do that.
@@ -116,14 +138,47 @@ The function `pl_profiler_enable(true)` will cause the **plprofiler** extension 
 
 With this changed application code, we can run
 
-`pgbench -n -c24 -j24 -T60 -fpgbench_pl.collect.profile`
+```
+plprofiler reset-data
+pgbench -n -c24 -j24 -T300 -fpgbench_pl.collect.profile
+```
 
-After that has finished, we use the collected-data (the data, that has been copied by the `pl_profiler_collect_data()` function into the `pl_profiler_linestats_data` and `pl_profiler_callgraph_data` tables) to generate a report.
+The `reset-data` command truncates the two global tables. After pgbench has finished, we use the collected-data (the data, that has been copied by the `pl_profiler_collect_data()` function into the `pl_profiler_linestats_data` and `pl_profiler_callgraph_data` tables) to generate a report.
 
-`plprofiler report --from-data --name "tpcb-clients1" --output "tpcb-clients1.html"`
+`plprofiler report --from-data --name "tpcb-using-collect" --output "tpcb-using-collect.html"`
 
-The resulting profile is [here](http://wi3ck.info/plprofiler/doc/tpcb-clients1.html).
+[ ![tpcb-using-collect.hmtl](images/tpcb-using-collect.png) ](http://wi3ck.info/plprofiler/doc/tpcb-using-collect.html)
+[`doc/tpcb-using-collect.html`](http://wi3ck.info/plprofiler/doc/tpcb-using-collect.html)
 
-[ ![tpcb-clients1.hmtl](images/tpcb-test1-clients1.png) ](http://wi3ck.info/plprofiler/doc/tpcb-clients1.html)
+There seems to be only a subtle change in the profile. The functions for updating the pgbench_branches and pgbench_tellers tables, which are almost invisible in the first profile, now used 5.81% and 2.60% of the time. That may not look like much, but with the access to pgbench_accounts being as screwed up as it is, this is in fact huge. The difference was caused by concurrency (24 clients).
 
-That is just the same as what we got from running the function from within the 
+The last pgbench run only showed a drop of the overall performance from 136 TPS to 132 TPS. But generating the report took considerably longer than before. This is because even at this bad performance and with this tiny amount of PL/pgSQL code involved, the **plprofiler** generated almost a million lines in the global tables, that need to be aggregated into the report. This is not going to work well if there are thousands of lines of PL/pgSQL code involved with a system, that runs at thousands of TPS.
+
+For those reasons, this method of capturing profiling data is only useful for profiling a few rather infrequent but expensive PL/pgSQL functions.
+
+Saving statistics at a timed interval
+-------------------------------------
+
+Instead of saving the in-memory-data after each individual transaction, we can configure it to copy the in-memory-data only every N seconds to the global collected-data tables (and reset the in-memory counters). The saving happens when a PL/pgSQL function exits and the timer has elapsed. This is not as accurate because if that automatic collection happens in a transaction, that later rolls back, those statistics get lost. The last interval at the end is also lost. But for the example at hand it is certainly suitable.
+
+For this we use a slightly different pgbench custom profile, [`pgbench_pl.interval.profile`](../examples/pgbench_pl.interval.profile).
+
+```
+\set nbranches :scale
+\set ntellers 10 * :scale
+\set naccounts 100000 * :scale
+\setrandom aid 1 :naccounts
+\setrandom bid 1 :nbranches
+\setrandom tid 1 :ntellers
+\setrandom delta -5000 5000
+SET plprofiler.enabled TO true;
+SET plprofiler.save_interval TO 10;
+SELECT tpcb(:aid, :bid, :tid, :delta);
+```
+
+I am not showing the resulting report for that because it is almost identical to the previous one. However, the collected-data in the global tables shrunk from almost a million rows to undere 20,000. Also, our performance is back up to 135 TPS.
+
+Profiling without changing the application
+------------------------------------------
+
+
