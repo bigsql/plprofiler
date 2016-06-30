@@ -1,6 +1,8 @@
 PL Profiler Examples
 ====================
 
+In this tutorial style set of examples, I mostly want to demonstrate the different ways, **plprofiler** allows to capture profiling data.
+
 It is assumed that anyone, interested in profiling complex PL/pgSQL code, is familiar with performance testing in general and performance testing of a PostgreSQL database in particular. Therefore it is also also assumed that the reader has a basic understanding of the pgbench utility.
 
 The example test case
@@ -14,9 +16,9 @@ All examples in this documentation are based on a modified pgbench database. The
     * The filler column is expanded and filled with 500 characters of data.
     * A new column, `category interger` is added in front of the aid and made part of the primary key.
 	
-The modifications to the pgbench_accounts table are based on a real world case, encountered in a customer database. This pgbench example case of course is greatly simplified. In the real world case the access to the table in question was in a nested function, 8 call levels deep, and the table had several indexes to choose from.
+The modifications to the pgbench_accounts table are based on a real world case, encountered in a customer database. This pgbench example case of course is greatly simplified. In the real world case the access to the table in question was in a nested function, 8 call levels deep, the table had several indexes to choose from and the schema contained a total of >500 PL/pgSQL functions with >100,000 lines of PL code. A needle in what once was a haystack, but had been eaten by an elephant.
 
-The problem, produced by these modifications, is as follows. The TPC-B transaction accesses the pgbench_accounts table based on the aid column alone, so that is the only key part, available in the WHERE clause. However, since the table rows are now >500 bytes wide and the index is rather small, compared to that, the PostgreSQL query optimizer will still choose an index scan. This is the right choice, based on the available options, because a sequential scan would be far worse.
+Despite the simplification, the problem, produced by these modifications, still simulates the original case surprisingly well. The TPC-B transaction accesses the pgbench_accounts table based on the aid column alone, so that is the only key part, available in the WHERE clause. However, since the table rows are now >500 bytes wide and the index is rather small, compared to the heap, the PostgreSQL query optimizer will still choose an index scan. This is the right choice, based on the available options, because a sequential scan would be far worse.
 
 ```
 pgbench_plprofiler=# explain select abalance from pgbench_accounts where aid = 1;
@@ -26,13 +28,102 @@ pgbench_plprofiler=# explain select abalance from pgbench_accounts where aid = 1
    Index Cond: (aid = 1)
 ```
 
-Since the first column of the index is not part of the WHERE clause and thus, the index condition, this results in a full scan of the index! Unfortunately that detail is nowhere visible. If we look at pg_stat_* tables after a benchmark run for example, they only tell us that all access to pgbench_accounts was done via index scans over the primary key and that all those scans returned a single row. One would normally think "nothing wrong here".
+Since the first column of the index is not part of the WHERE clause and thus, the index condition, this results in a full scan of the entire index! Unfortunately that detail is nowhere visible except in this explain output. If we look at pg_stat_* tables after a benchmark run for example, they only tell us that all access to pgbench_accounts was done via index scans over the primary key and that all those scans returned a single row. One would normally think "nothing wrong here".
 
 On top of that, since the queries accessing the table will never show up in any statistics, we will never see that each of them takes 30ms already on a 10x pgbench scaling factor. Imagine what that turns into when we scale out.
 
 The full script to prepare the pgbench test database is found [here](../examples/prepdb.sh).
 
+General command syntax and options
+----------------------------------
+
+The general syntax of the plprofiler utility is
+
+`plprofiler COMMAND [OPTIONS]`
+
+Common for all commands are options, that control the database connection. These are
+
+Option                | Description
+--------------------- | ------------------------
+`-h, --host=HOST`     | The host to connect to.
+`-p, --port=PORT`     | Port number the postmaster is listening on.
+`-U, --user=USER`     | The database user name.
+`-d, --dbname=DB`     | The database name, conninfo string or URI.
+
+In the examples below it is assumed that the environment variables `PGHOST`, `PGPORT`, `PGUSER` and `PGDATABASE` have all been set to point to the pgbench_plprofiler database, that was created using the [examples/prepdb.sh](../examples/prepdb.sh) script. The above connection parameters are left out to make the examples more readable. For security reasons, there is not way to specify a password on the command line. Please create the necessary `~/.pgpass` entry if your database requires password authentication.
+
 Executing SQL using the plprofiler utility
 ------------------------------------------
 
+After having installed the **plprofiler** extension in the test database, the easiest way to generate a profile of PL/pgSQL functions is to run them using the plprofiler utility and let it create an HTML report directly from the in-memory-data, collected in the backend.
 
+`plprofiler run --command "SELECT tpcb(1, 2, 3, -42)" --output tpcb-test1.html`
+
+Since not all information for the HTML report was actually specified on the command line, the utility will launch your `$EDITOR` with a config file after the SQL statement finished, so you have a chance to change some of the defaults before it renders the HTML. At the end this will create the report `tpcb-test1.html` in the current directory, which should look more or less like the one, presented in the [Overview](../README.md).
+
+One thing to keep in mind about this style of profiling is that there is a significant overhead in PL/pgSQL on the first call to a function within a database session (connection). The PL/pgSQL function call handler must parse the entire function definition and create a saved PL execution tree for it. Certain types of SQL statements will also be parsed and verified. For these reasons calling a truly trivial PL/pgSQL example like this can give very misleading results. 
+
+To avoid this, the function should be called several times in a row. The file [examples/tpcb_queries.sql](../examples/tpcb_queries.sql) contains a set of 20 calls to the `tpcb()` function and can be executed as
+
+`plprofiler run --file tpcb_queries.sql --output tpcb-test1.html`
+
+Analyzing the first profile
+---------------------------
+
+The report generated by the last `plprofiler` command (the one with the --file option used) should look roughly like [this](http://wi3ck.info/plprofiler/doc/tpcb-test1.html) (I narrowed the SVG FlameGraph from the default width of 1200 pixels to 800 to play nicer with embedding into markdown on bitbucket) and I set the tabstop to 4, which is how the SQL file for the PL functions is formatted:
+
+[ ![tpcb-test1.hmtl](images/tpcb-test1.png) ](http://wi3ck.info/plprofiler/doc/tpcb-test1.html)
+
+Go ahead and open the actual HTML version in a separate window or tab to be able to interact with it.
+
+What sticks out at the top of the FlameGraph are the two functions `tpcb_fetch_abalance()` and its caller, `tpcb_upd_accounts()`. When you hover with your cursor over the FlameGraph entry for `tpcb_upd_accounts()` you will see that it actually accounted for 99.23% of the total execution time, spent inside of PL/pgSQL functions.
+
+To examine this function closer we scroll down in the report to the details of `tpcb_upd_accounts()` and click on the **(show)** link, we can see the source code of the function and the execution time spent in every single line of it.
+
+![Details of tpcb_upd_accounts](images/tpcb-test1-upd_accounts.png)
+
+Obviously there is a problem with accessing the pgbench_accounts table in that UPDATE statement. This function uses up 99% of our time and 50% of that is spent in a single row UPDATE statement? That cannot be right. 
+
+Likewise if we examine the details for function `tpcb_fetch_abalance()`, we find that the same access path (single row SELECT via pgbench_accounts.aid) has the exact same performance problem.
+
+![Details of tpcb_fetch_abalance](images/tpcb-test1-fetch_abalance.png)
+
+Of course, this all was an excercise in [Hunting an Elephant the Experienced Programmer's way](https://paws.kettering.edu/~jhuggins/humor/elephants.html). I deliberately placed an elephant in the middle of the room and found it. Not much of a surprise. It is what it is, the artificial reproduction of a real world problem encountered in the wild. You will have to take my word for it that it was almost as easy to find the problem in the real world case, this example is based on.
+
+We're not going to fix the actual problem (missing/wrong index) just yet, but explore alternative methods of invoking the **plprofiler** instead. This way we can compare all the different methods based on the same broken schema.
+
+Capturing profiling data by instrumenting the application
+---------------------------------------------------------
+
+Sometimes it may be easier to add instrumentation calls to the application, than to extract stand alone queries, that can be run by the **plprofiler** via the --command or --file options. The way to do this is to add some **plprofiler** function calls at strategic places in the application code. In the case of pgbench, this *application code* is the custom profile.
+
+```
+\set nbranches :scale
+\set ntellers 10 * :scale
+\set naccounts 100000 * :scale
+\setrandom aid 1 :naccounts
+\setrandom bid 1 :nbranches
+\setrandom tid 1 :ntellers
+\setrandom delta -5000 5000
+SELECT pl_profiler_enable(true);
+SELECT tpcb(:aid, :bid, :tid, :delta);
+SELECT pl_profiler_collect_data();
+```
+
+The **plprofiler** extension creates several global tables in the schema, it is installed in. The two important ones (for now) are `pl_profiler_linestats_data` and `pl_profiler_callgraph_data`. In order to use this profiling method you need to be able to GRANT the application user(s) INSERT permission to these two tables. Since they are owned by default by a database superuser, you must be one too to do that.
+
+The function `pl_profiler_enable(true)` will cause the **plprofiler** extension to be loaded and start accumulating profiling data in the in-memory-data hash tables. The function `pl_profiler_collect_data()` copies that in-memory-data over to the global tables and resets the in-memory-data counters to zero.
+
+With this changed application code, we can run
+
+`pgbench -n -c24 -j24 -T60 -fpgbench_pl.collect.profile`
+
+After that has finished, we use the collected-data (the data, that has been copied by the `pl_profiler_collect_data()` function into the `pl_profiler_linestats_data` and `pl_profiler_callgraph_data` tables) to generate a report.
+
+`plprofiler report --from-data --name "tpcb-clients1" --output "tpcb-clients1.html"`
+
+The resulting profile is [here](http://wi3ck.info/plprofiler/doc/tpcb-clients1.html).
+
+[ ![tpcb-clients1.hmtl](images/tpcb-test1-clients1.png) ](http://wi3ck.info/plprofiler/doc/tpcb-clients1.html)
+
+That is just the same as what we got from running the function from within the 
