@@ -10,11 +10,11 @@ The **plprofiler** is an extension for the PostgreSQL database system to create 
     * [General command syntax](doc/examples.md#markdown-header-general-command-syntax)
 	* [Executing SQL using the plprofiler utility](doc/examples.md#markdown-header-executing-sql-using-the-plprofiler-utility)
 	* [Analyzing the first profile](doc/examples.md#markdown-header-analyzing-the-first-profile)
-	* [Capturing profiling data by instrumenting the application](doc/examples.md#capturing-profiling-data-by-instrumenting-the-application)
-	* [Saving statistics at a timed interval](doc/examples.md#saving-statistics-at-a-timed-interval)
-	* [Saving statistics via ALTER USER](doc/examples.md#saving-statistics-via-alter-user)
-	* [Profiling a live production system](doc/examples.md#profiling-a-live-production-system)
-	* [Fixing the performance problem](doc/examples.md#fixing-the-performance-problem)
+	* [Capturing profiling data by instrumenting the application](doc/examples.md#markdown-header-capturing-profiling-data-by-instrumenting-the-application)
+	* [Saving statistics at a timed interval](doc/examples.md#markdown-header-saving-statistics-at-a-timed-interval)
+	* [Saving statistics via ALTER USER](doc/examples.md#markdown-header-saving-statistics-via-alter-user)
+	* [Profiling a live production system](doc/examples.md#markdown-header-profiling-a-live-production-system)
+	* [Fixing the performance problem](doc/examples.md#markdown-header-fixing-the-performance-problem)
 
 Overview
 --------
