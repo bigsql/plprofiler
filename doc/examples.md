@@ -158,10 +158,10 @@ The last pgbench run only showed a drop of the overall performance from 136 TPS 
 
 For those reasons, this method of capturing profiling data is only useful for profiling a few rather infrequent but expensive PL/pgSQL functions.
 
-Saving statistics at a timed interval
--------------------------------------
+Collecting statistics at a timed interval
+-----------------------------------------
 
-Instead of saving the in-memory-data after each individual transaction, we can configure it to copy the in-memory-data only every N seconds to the global collected-data tables (and reset the in-memory counters). The saving happens when a PL/pgSQL function exits and the timer has elapsed. This is not as accurate because if that automatic collection happens in a transaction, that later rolls back, those statistics get lost. The last interval at the end is also lost. But for the example at hand it is certainly suitable.
+Instead of collecting the in-memory-data after each individual transaction, we can configure it to copy the in-memory-data only every N seconds to the global collected-data tables (and reset the in-memory counters). The collecting happens when a PL/pgSQL function exits and the timer has elapsed. This is not as accurate because if that automatic collection happens in a transaction, that later rolls back, those statistics get lost. The last interval at the end is also lost. But for the example at hand it is certainly suitable.
 
 For this we use a slightly different pgbench custom profile, [`pgbench_pl.interval.profile`](../examples/pgbench_pl.interval.profile).
 
@@ -180,8 +180,8 @@ SELECT tpcb(:aid, :bid, :tid, :delta);
 
 I am not showing the resulting report for that because it is almost identical to the previous one. However, the collected-data in the global tables shrunk from almost a million rows to undere 20,000. Also, our performance is back up to 135 TPS.
 
-Saving statistics via ALTER USER
---------------------------------
+Collecting statistics via ALTER USER
+------------------------------------
 
 The above can also be done without changing the application code at all. Instead we can add the **plprofiler** to the `postgresql.conf` file in
 
