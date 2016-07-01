@@ -15,6 +15,17 @@ The **plprofiler** is an extension for the PostgreSQL database system to create 
 	* [Saving statistics via ALTER USER](doc/examples.md#markdown-header-saving-statistics-via-alter-user)
 	* [Profiling a live production system](doc/examples.md#markdown-header-profiling-a-live-production-system)
 	* [Fixing the performance problem](doc/examples.md#markdown-header-fixing-the-performance-problem)
+4. [plprofiler command reference](doc/plprofiler_cmd_ref.md)
+    * [Command run](doc/plprofiler_cmd_ref.md#markdown-header-command-run)
+    * [Command monitor](doc/plprofiler_cmd_ref.md#markdown-header-command-monitor)
+    * [Command reset-data](doc/plprofiler_cmd_ref.md#markdown-header-command-reset-data)
+    * [Command save](doc/plprofiler_cmd_ref.md#markdown-header-command-save)
+    * [Command list](doc/plprofiler_cmd_ref.md#markdown-header-command-list)
+    * [Command edit](doc/plprofiler_cmd_ref.md#markdown-header-command-edit)
+    * [Command report](doc/plprofiler_cmd_ref.md#markdown-header-command-report)
+    * [Command delete](doc/plprofiler_cmd_ref.md#markdown-header-command-delete)
+    * [Command export](doc/plprofiler_cmd_ref.md#markdown-header-command-export)
+    * [Command import](doc/plprofiler_cmd_ref.md#markdown-header-command-import)
 
 Overview
 --------
