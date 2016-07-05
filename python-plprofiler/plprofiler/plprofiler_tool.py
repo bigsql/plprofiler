@@ -575,14 +575,6 @@ def export_command(argv):
         sys.write.stderr("option --all, --name or --from-data must be given\n")
         return 2
 
-    if opt_all:
-        export_names = [row[0] for row in plp.get_dataset_list()]
-    else:
-        if opt_from_data:
-            export_names = ['collected_data']
-        else:
-            export_names = [opt_name]
-
     if opt_output is None:
         output_fd = sys.stdout
     else:
@@ -594,6 +586,14 @@ def export_command(argv):
     except Exception as err:
         sys.stderr.write(str(err) + '\n')
         return 1
+
+    if opt_all:
+        export_names = [row[0] for row in plp.get_dataset_list()]
+    else:
+        if opt_from_data:
+            export_names = ['collected_data']
+        else:
+            export_names = [opt_name]
 
     # ----
     # Build the export data set.
