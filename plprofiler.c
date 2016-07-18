@@ -268,7 +268,9 @@ _PG_init(void)
 							NULL);
 
 	plugin_ptr = (PLpgSQL_plugin **)find_rendezvous_variable("PLpgSQL_plugin");
+	*plugin_ptr = &plugin_funcs;
 
+	plugin_ptr = (PLpgSQL_plugin **)find_rendezvous_variable("PLTSQL_plugin");
 	*plugin_ptr = &plugin_funcs;
 }
 
