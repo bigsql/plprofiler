@@ -16,6 +16,6 @@ include $(top_builddir)/src/Makefile.global
 include $(top_srcdir)/contrib/contrib-global.mk
 
 plprofiler.o: CFLAGS += -I$(top_builddir)/src/pl/plpgsql/src
-
 endif
 
+plprofiler.o: plprofiler.c plprofiler.h
