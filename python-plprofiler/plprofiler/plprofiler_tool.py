@@ -911,7 +911,14 @@ def monitor_command(argv):
     return 0
 
 def edit_config_info(config):
-    EDITOR = os.environ.get('EDITOR','vim') #that easy!
+    if os.name == 'posix':
+        default_editor = 'vi'
+    elif os.name == 'nt':
+        default_editor = 'notepad'
+    else:
+        raise Exception("unsupported OS type %s" %os.name)
+
+    EDITOR = os.environ.get('EDITOR', default_editor)
     opts = ['title', 'tabstop', 'svg_width', 'table_width', 'desc', ]
 
     name = config['name']
