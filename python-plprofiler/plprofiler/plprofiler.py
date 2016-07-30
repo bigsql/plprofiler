@@ -857,6 +857,25 @@ class plprofiler:
     def enable_monitor(self, opt_pid = None, opt_interval = 10):
         self.dbconn.autocommit = True
         cur = self.dbconn.cursor()
+        cur.execute("""
+                SELECT setting
+                  FROM pg_catalog.pg_settings
+                 WHERE name = 'server_version_num'
+            """)
+        server_version_num = int(cur.fetchone()[0])
+        if server_version_num < 90400:
+            cur.execute("""
+                    SELECT setting
+                      FROM pg_catalog.pg_settings
+                     WHERE name = 'server_version'
+                """)
+            server_version = cur.fetchone()[0]
+            self.dbconn.autocommit = False
+            raise Exception(("ERROR: monitor command not supported on " +
+                            "server version %s. Perform monitoring manually " +
+                            "via postgresql.conf changes and reloading " +
+                            "the postmaster.") %server_version)
+
         if opt_pid is not None:
             cur.execute("""ALTER SYSTEM SET plprofiler.enable_pid TO %s""", (opt_pid, ))
         else:

@@ -900,7 +900,11 @@ def monitor_command(argv):
         return 1
 
     plp.reset_data()
-    plp.enable_monitor(opt_pid, opt_interval)
+    try:
+        plp.enable_monitor(opt_pid, opt_interval)
+    except Exception as err:
+        print str(err)
+        return 1
     print "monitoring for %d seconds ..." %(int(opt_duration))
     try:
         time.sleep(int(opt_duration))
