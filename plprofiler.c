@@ -610,7 +610,7 @@ findSource(Oid oid, HeapTuple *tup, char **funcName)
 static int
 scanSource(const char *src)
 {
-	int			line_count = 1;
+	int			line_count = 0;
 	const char *cp = src;
 
 	while(cp != NULL)
