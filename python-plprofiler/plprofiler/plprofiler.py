@@ -36,13 +36,18 @@ class plprofiler:
                 FROM pg_catalog.pg_extension E
                 JOIN pg_catalog.pg_namespace N ON N.oid = E.extnamespace
                 WHERE E.extname = 'plprofiler'
-            """);
-        row = cur.next()
+            """)
+        row = cur.fetchone()
+        if row is None:
+            cur.execute("""SELECT pg_catalog.current_database()""")
+            dbname = cur.fetchone()[0]
+            cur.close()
+            self.dbconn.rollback()
+            raise Exception('ERROR: plprofiler extension not found in ' +
+                            'database "%s"' %dbname)
+        result = row[0]
         cur.close()
         self.dbconn.rollback()
-        if row is None:
-            raise Exception("plprofiler extension not found")
-        result = row[0]
         return result
 
     def save_dataset_from_data(self, opt_name, config, overwrite = False):
