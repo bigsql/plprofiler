@@ -541,7 +541,7 @@ find_source(Oid oid, HeapTuple *tup, char **funcName)
 static int
 count_source_lines(const char *src)
 {
-	int			line_count = 1;
+	int			line_count = 0;
 	const char *cp = src;
 
 	while(cp != NULL)

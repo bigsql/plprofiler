@@ -51,13 +51,29 @@ class plprofiler_report:
         self.out("</body>")
         self.out("</html>")
 
+    def format_d_comma(self, num):
+        s = str(num)
+        r = []
+        l = len(s)
+        i = 0
+        j = l % 3
+        if j == 0:
+            j = 3
+        while j <= l:
+            r.append(s[i:j])
+            i = j
+            j += 3
+        return ",".join(r)
+
     def generate_function_output(self, config, func_def):
+        func_def['self_time_fmt'] = self.format_d_comma(func_def['self_time'])
+        func_def['total_time_fmt'] = self.format_d_comma(func_def['total_time'])
         self.out("""<a name="A{funcoid}" />""".format(**func_def))
         self.out("""<h3>Function {schema}.{funcname}() oid={funcoid} (<a id="toggle_{funcoid}"
                 href="javascript:toggle_div('toggle_{funcoid}', 'div_{funcoid}')">show</a>)</h3>""".format(**func_def))
         self.out("""<p>""")
-        self.out("""self_time = {self_time:,d} &micro;s<br/>""".format(**func_def))
-        self.out("""total_time = {total_time:,d} &micro;s""".format(**func_def))
+        self.out("""self_time = {self_time_fmt:s} &micro;s<br/>""".format(**func_def))
+        self.out("""total_time = {total_time_fmt:s} &micro;s""".format(**func_def))
         self.out("""</p>""")
         self.out("""<table border="0" cellpadding="0" cellspacing="0">""")
         self.out("""  <tr>""")
@@ -107,7 +123,7 @@ class plprofiler_report:
         path = os.path.dirname(os.path.abspath(__file__))
         path = os.path.join(path, 'lib', 'FlameGraph', 'flamegraph.pl', )
 
-        proc = subprocess.Popen([path,
+        proc = subprocess.Popen(['perl', path,
                     "--title=%s" %(config['title'], ),
                     "--width=%s" %(config['svg_width'], ), ],
                     stdin = subprocess.PIPE,
