@@ -454,7 +454,7 @@ profiler_func_end(PLpgSQL_execstate *estate, PLpgSQL_function *func)
 					"not found", func->fn_oid);
 
 	/* Loop through each line of source code and update the stats */
-	for(i = 0; i < profiler_info->line_count; i++)
+	for(i = 1; i < profiler_info->line_count; i++)
 	{
 		entry->line_info[i].exec_count +=
 				profiler_info->line_info[i].exec_count;
@@ -514,7 +514,7 @@ profiler_stmt_beg(PLpgSQL_execstate *estate, PLpgSQL_stmt *stmt)
 
 	/* Set the start time of the statement */
 	profiler_info = (profilerInfo *)estate->plugin_info;
-	if (stmt->lineno <= profiler_info->line_count)
+	if (stmt->lineno < profiler_info->line_count)
 	{
 		line_info = profiler_info->line_info + stmt->lineno;
 		INSTR_TIME_SET_CURRENT(line_info->start_time);
@@ -556,7 +556,7 @@ profiler_stmt_end(PLpgSQL_execstate *estate, PLpgSQL_stmt *stmt)
 	 * Ignore out of bounds line numbers. Someone is apparently
 	 * profiling while executing DDL ... not much use in that.
 	 */
-	if (stmt->lineno > profiler_info->line_count)
+	if (stmt->lineno >= profiler_info->line_count)
 		return;
 
 	/* Tell collect_data() that new information has arrived locally. */
