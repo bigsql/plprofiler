@@ -162,7 +162,7 @@ typedef struct callGraphEntry
 
 typedef struct
 {
-	LWLock			   *lock;
+	LWLockId			lock;
 	bool				callgraph_overflow;
 	bool				functions_overflow;
 	bool				lines_overflow;
