@@ -28,33 +28,50 @@
 #include "utils/tqual.h"
 #endif
 
+#include "access/sysattr.h"
+#include "catalog/indexing.h"
+#include "catalog/namespace.h"
+#include "catalog/pg_extension.h"
+#include "catalog/pg_proc.h"
+#include "catalog/pg_type.h"
+#include "commands/extension.h"
 #include "funcapi.h"
 #include "mb/pg_wchar.h"
 #include "miscadmin.h"
+#include "pgstat.h"
+#include "plpgsql.h"
+#include "storage/ipc.h"
+#include "storage/spin.h"
 #include "utils/array.h"
 #include "utils/builtins.h"
 #include "utils/fmgroids.h"
 #include "utils/guc.h"
-#include "utils/palloc.h"
-#include "utils/memutils.h"
-#include "utils/syscache.h"
 #include "utils/lsyscache.h"
-#include "catalog/pg_proc.h"
-#include "catalog/pg_type.h"
-#include "catalog/pg_extension.h"
-#include "catalog/indexing.h"
-#include "catalog/namespace.h"
-#include "access/sysattr.h"
-#include "commands/extension.h"
-#include "plpgsql.h"
-#include "pgstat.h"
+#include "utils/memutils.h"
+#include "utils/palloc.h"
+#include "utils/syscache.h"
 
 PG_MODULE_MAGIC;
 
 #define PL_PROFILE_COLS		5
 #define PL_CALLGRAPH_COLS	5
 #define PL_FUNCS_SRC_COLS	3
-#define PL_MAX_STACK_DEPTH	100
+
+#define PL_MAX_STACK_DEPTH	200
+#define PL_MIN_FUNCTIONS	2000
+#define PL_MIN_CALLGRAPH	20000
+#define PL_MIN_LINES		200000
+
+
+#define PL_DBG_PRINT_STACK(_d, _s) do {	\
+		int _i;						\
+		printf("stack %s: db=%d bt=", _d, _s.db_oid); \
+		for (_i = 0; _i < PL_MAX_STACK_DEPTH && _s.stack[_i] != InvalidOid; _i++) { \
+		    printf("%d,", _s.stack[_i]); \
+		} \
+		printf("\n"); \
+	} while(0);
+
 
 /**********************************************************************
  * Type and structure definitions
@@ -122,6 +139,7 @@ typedef struct
 typedef struct
 {
 	linestatsHashKey	key;		/* hash key of entry */
+	slock_t				mutex;		/* Spin lock for updating counters */
 	int					line_count;	/* Number of lines in this function */
 	linestatsLineInfo  *line_info;	/* Performance counters for each line */
 } linestatsEntry;
@@ -135,11 +153,22 @@ typedef struct callGraphKey
 typedef struct callGraphEntry
 {
     callGraphKey	key;
+	slock_t			mutex;
 	PgStat_Counter	callCount;
 	uint64			totalTime;
 	uint64			childTime;
 	uint64			selfTime;
 } callGraphEntry;
+
+typedef struct
+{
+	LWLock			   *lock;
+	bool				callgraph_overflow;
+	bool				functions_overflow;
+	bool				lines_overflow;
+	int					lines_used;
+	linestatsLineInfo	line_info[1];
+} profilerSharedState;
 
 /**********************************************************************
  * Exported function prototypes
@@ -149,21 +178,35 @@ void    _PG_init(void);
 void    _PG_fini(void);
 
 Datum pl_profiler_get_stack(PG_FUNCTION_ARGS);
-Datum pl_profiler_linestats(PG_FUNCTION_ARGS);
-Datum pl_profiler_callgraph(PG_FUNCTION_ARGS);
-Datum pl_profiler_func_oids_current(PG_FUNCTION_ARGS);
+Datum pl_profiler_linestats_local(PG_FUNCTION_ARGS);
+Datum pl_profiler_linestats_shared(PG_FUNCTION_ARGS);
+Datum pl_profiler_callgraph_local(PG_FUNCTION_ARGS);
+Datum pl_profiler_callgraph_shared(PG_FUNCTION_ARGS);
+Datum pl_profiler_func_oids_local(PG_FUNCTION_ARGS);
+Datum pl_profiler_func_oids_shared(PG_FUNCTION_ARGS);
 Datum pl_profiler_funcs_source(PG_FUNCTION_ARGS);
-Datum pl_profiler_reset(PG_FUNCTION_ARGS);
+Datum pl_profiler_reset_local(PG_FUNCTION_ARGS);
+Datum pl_profiler_reset_shared(PG_FUNCTION_ARGS);
 Datum pl_profiler_enable(PG_FUNCTION_ARGS);
 Datum pl_profiler_collect_data(PG_FUNCTION_ARGS);
+Datum pl_profiler_callgraph_overflow(PG_FUNCTION_ARGS);
+Datum pl_profiler_functions_overflow(PG_FUNCTION_ARGS);
+Datum pl_profiler_lines_overflow(PG_FUNCTION_ARGS);
 
 PG_FUNCTION_INFO_V1(pl_profiler_get_stack);
-PG_FUNCTION_INFO_V1(pl_profiler_linestats);
-PG_FUNCTION_INFO_V1(pl_profiler_callgraph);
-PG_FUNCTION_INFO_V1(pl_profiler_func_oids_current);
+PG_FUNCTION_INFO_V1(pl_profiler_linestats_local);
+PG_FUNCTION_INFO_V1(pl_profiler_linestats_shared);
+PG_FUNCTION_INFO_V1(pl_profiler_callgraph_local);
+PG_FUNCTION_INFO_V1(pl_profiler_callgraph_shared);
+PG_FUNCTION_INFO_V1(pl_profiler_func_oids_local);
+PG_FUNCTION_INFO_V1(pl_profiler_func_oids_shared);
 PG_FUNCTION_INFO_V1(pl_profiler_funcs_source);
-PG_FUNCTION_INFO_V1(pl_profiler_reset);
+PG_FUNCTION_INFO_V1(pl_profiler_reset_local);
+PG_FUNCTION_INFO_V1(pl_profiler_reset_shared);
 PG_FUNCTION_INFO_V1(pl_profiler_enable);
 PG_FUNCTION_INFO_V1(pl_profiler_collect_data);
+PG_FUNCTION_INFO_V1(pl_profiler_callgraph_overflow);
+PG_FUNCTION_INFO_V1(pl_profiler_functions_overflow);
+PG_FUNCTION_INFO_V1(pl_profiler_lines_overflow);
 
 #endif /* PLPROFILER_H */

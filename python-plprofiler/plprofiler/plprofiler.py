@@ -50,10 +50,10 @@ class plprofiler:
         self.dbconn.rollback()
         return result
 
-    def save_dataset_from_data(self, opt_name, config, overwrite = False):
+    def save_dataset_from_local(self, opt_name, config, overwrite = False):
         # ----
-        # Aggregate the existing data found in pl_profiler_linestats_data
-        # and pl_profiler_callgraph_data into a new entry in *_saved.
+        # Aggregate the existing data found in pl_profiler_linestats_local
+        # and pl_profiler_callgraph_local into a new entry in *_saved.
         # ----
         cur = self.dbconn.cursor()
         cur.execute("""SET search_path TO %s;""", (self.profiler_namespace, ))
@@ -64,8 +64,9 @@ class plprofiler:
                 cur.execute("""DELETE FROM pl_profiler_saved
                                 WHERE s_name = %s""", (opt_name, ))
             cur.execute("""INSERT INTO pl_profiler_saved
-                                (s_name, s_options)
-                            VALUES (%s, %s)""",
+                                (s_name, s_options, s_callgraph_overflow,
+                                 s_functions_overflow, s_lines_overflow)
+                            VALUES (%s, %s, false, false, false)""",
                         (opt_name, json.dumps(config)))
         except psycopg2.IntegrityError as err:
             self.dbconn.rollback()
@@ -80,8 +81,7 @@ class plprofiler:
                                pg_catalog.pg_get_function_arguments(P.oid) as func_args
                         FROM pg_catalog.pg_proc P
                         JOIN pg_catalog.pg_namespace N on N.oid = P.pronamespace
-                        WHERE P.oid IN (SELECT DISTINCT func_oid
-                                            FROM pl_profiler_linestats_data)
+                        WHERE P.oid IN (SELECT * FROM unnest(pl_profiler_func_oids_local()))
                         GROUP BY s_id, p.oid, nspname, proname
                         ORDER BY s_id, p.oid, nspname, proname""")
         if cur.rowcount == 0:
@@ -97,12 +97,8 @@ class plprofiler:
                                coalesce(S.source, '-- SOURCE NOT FOUND'),
                                sum(L.exec_count), sum(L.total_time),
                                max(L.longest_time)
-                        FROM pl_profiler_linestats_data L
-                        LEFT JOIN pl_profiler_funcs_source(
-                                    ARRAY(SELECT f_funcoid
-                                            FROM pl_profiler_saved_functions
-                                            WHERE f_s_id = currval('pl_profiler_saved_s_id_seq'))
-                                ) S
+                        FROM pl_profiler_linestats_local() L
+                        JOIN pl_profiler_funcs_source(pl_profiler_func_oids_local()) S
                             ON S.func_oid = L.func_oid
                             AND S.line_number = L.line_number
                         GROUP BY s_id, L.func_oid, L.line_number, S.source
@@ -115,10 +111,84 @@ class plprofiler:
                             (c_s_id, c_stack, c_call_count, c_us_total,
                              c_us_children, c_us_self)
                         SELECT currval('pl_profiler_saved_s_id_seq') as s_id,
-                               pl_profiler_get_stack(stack) as stack,
+                               pl_profiler_get_stack(stack),
                                sum(call_count), sum(us_total),
                                sum(us_children), sum(us_self)
-                        FROM pl_profiler_callgraph_data
+                        FROM pl_profiler_callgraph_local()
+                        GROUP BY s_id, stack
+                        ORDER BY s_id, stack;""")
+
+        cur.execute("""RESET search_path""")
+        cur.close()
+        self.dbconn.commit()
+
+    def save_dataset_from_shared(self, opt_name, config, overwrite = False):
+        # ----
+        # Aggregate the existing data found in pl_profiler_linestats_shared
+        # and pl_profiler_callgraph_shared into a new entry in *_saved.
+        # ----
+        cur = self.dbconn.cursor()
+        cur.execute("""SET search_path TO %s;""", (self.profiler_namespace, ))
+        cur.execute("""SET TRANSACTION ISOLATION LEVEL REPEATABLE READ;""")
+
+        try:
+            if overwrite:
+                cur.execute("""DELETE FROM pl_profiler_saved
+                                WHERE s_name = %s""", (opt_name, ))
+            cur.execute("""INSERT INTO pl_profiler_saved
+                                (s_name, s_options, s_callgraph_overflow,
+                                 s_functions_overflow, s_lines_overflow)
+                            VALUES (%s, %s, pl_profiler_callgraph_overflow(),
+                                    pl_profiler_functions_overflow(),
+                                    pl_profiler_lines_overflow())""",
+                        (opt_name, json.dumps(config)))
+        except psycopg2.IntegrityError as err:
+            self.dbconn.rollback()
+            raise err
+
+        cur.execute("""INSERT INTO pl_profiler_saved_functions
+                            (f_s_id, f_funcoid, f_schema, f_funcname,
+                             f_funcresult, f_funcargs)
+                        SELECT currval('pl_profiler_saved_s_id_seq') as s_id,
+                               P.oid, N.nspname, P.proname,
+                               pg_catalog.pg_get_function_result(P.oid) as func_result,
+                               pg_catalog.pg_get_function_arguments(P.oid) as func_args
+                        FROM pg_catalog.pg_proc P
+                        JOIN pg_catalog.pg_namespace N on N.oid = P.pronamespace
+                        WHERE P.oid IN (SELECT * FROM unnest(pl_profiler_func_oids_shared()))
+                        GROUP BY s_id, p.oid, nspname, proname
+                        ORDER BY s_id, p.oid, nspname, proname""")
+        if cur.rowcount == 0:
+            self.dbconn.rollback()
+            raise Exception("No function data to save found")
+
+        cur.execute("""INSERT INTO pl_profiler_saved_linestats
+                            (l_s_id, l_funcoid,
+                             l_line_number, l_source, l_exec_count,
+                             l_total_time, l_longest_time)
+                        SELECT currval('pl_profiler_saved_s_id_seq') as s_id,
+                               L.func_oid, L.line_number,
+                               coalesce(S.source, '-- SOURCE NOT FOUND'),
+                               sum(L.exec_count), sum(L.total_time),
+                               max(L.longest_time)
+                        FROM pl_profiler_linestats_shared() L
+                        JOIN pl_profiler_funcs_source(pl_profiler_func_oids_shared()) S
+                            ON S.func_oid = L.func_oid
+                            AND S.line_number = L.line_number
+                        GROUP BY s_id, L.func_oid, L.line_number, S.source
+                        ORDER BY s_id, L.func_oid, L.line_number""")
+        if cur.rowcount == 0:
+            self.dbconn.rollback()
+            raise Exception("No plprofiler data to save")
+
+        cur.execute("""INSERT INTO pl_profiler_saved_callgraph
+                            (c_s_id, c_stack, c_call_count, c_us_total,
+                             c_us_children, c_us_self)
+                        SELECT currval('pl_profiler_saved_s_id_seq') as s_id,
+                               pl_profiler_get_stack(stack),
+                               sum(call_count), sum(us_total),
+                               sum(us_children), sum(us_self)
+                        FROM pl_profiler_callgraph_shared()
                         GROUP BY s_id, stack
                         ORDER BY s_id, stack;""")
 
@@ -139,6 +209,14 @@ class plprofiler:
         opt_name = config['name']
 
         # ----
+        # Add defaults for missing attributes in previous version.
+        # ----
+        if 'callgraph_overflow' not in report_data:
+            report_data['callgraph_overflow'] = False
+            report_data['functions_overflow'] = False
+            report_data['lines_overflow'] = False
+
+        # ----
         # Load the pl_profiler_saved entry.
         # ----
         try:
@@ -146,9 +224,13 @@ class plprofiler:
                 cur.execute("""DELETE FROM pl_profiler_saved
                                 WHERE s_name = %s""", (opt_name, ))
             cur.execute("""INSERT INTO pl_profiler_saved
-                                (s_name, s_options)
-                            VALUES (%s, %s)""",
-                        (opt_name, json.dumps(config)))
+                                (s_name, s_options, s_callgraph_overflow,
+                                 s_function_overflow, s_lines_overflow)
+                            VALUES (%s, %s, %s, %s, %s)""",
+                        (opt_name, json.dumps(config),
+                         report_data['callgraph_overflow'],
+                         report_data['functions_overflow'],
+                         report_data['lines_overflow'],))
         except psycopg2.IntegrityError as err:
             self.dbconn.rollback()
             raise err
@@ -190,77 +272,6 @@ class plprofiler:
                             VALUES
                                 (currval('pl_profiler_saved_s_id_seq'),
                                  %s::text[], %s, %s, %s, %s)""", row)
-
-        cur.execute("""RESET search_path""")
-        cur.close()
-        self.dbconn.commit()
-
-    def save_dataset_from_current(self, opt_name, config, overwrite = False):
-        # ----
-        # Aggregate the existing data found in pl_profiler_linestats_current
-        # and pl_profiler_callgraph_current into a new entry in *_saved.
-        # ----
-        cur = self.dbconn.cursor()
-        cur.execute("""SET search_path TO %s;""", (self.profiler_namespace, ))
-        cur.execute("""SET TRANSACTION ISOLATION LEVEL REPEATABLE READ;""")
-
-        try:
-            if overwrite:
-                cur.execute("""DELETE FROM pl_profiler_saved
-                                WHERE s_name = %s""", (opt_name, ))
-            cur.execute("""INSERT INTO pl_profiler_saved
-                                (s_name, s_options)
-                            VALUES (%s, %s)""",
-                        (opt_name, json.dumps(config)))
-        except psycopg2.IntegrityError as err:
-            self.dbconn.rollback()
-            raise err
-
-        cur.execute("""INSERT INTO pl_profiler_saved_functions
-                            (f_s_id, f_funcoid, f_schema, f_funcname,
-                             f_funcresult, f_funcargs)
-                        SELECT currval('pl_profiler_saved_s_id_seq') as s_id,
-                               P.oid, N.nspname, P.proname,
-                               pg_catalog.pg_get_function_result(P.oid) as func_result,
-                               pg_catalog.pg_get_function_arguments(P.oid) as func_args
-                        FROM pg_catalog.pg_proc P
-                        JOIN pg_catalog.pg_namespace N on N.oid = P.pronamespace
-                        WHERE P.oid IN (SELECT * FROM unnest(pl_profiler_func_oids_current()))
-                        GROUP BY s_id, p.oid, nspname, proname
-                        ORDER BY s_id, p.oid, nspname, proname""")
-        if cur.rowcount == 0:
-            self.dbconn.rollback()
-            raise Exception("No function data to save found")
-
-        cur.execute("""INSERT INTO pl_profiler_saved_linestats
-                            (l_s_id, l_funcoid,
-                             l_line_number, l_source, l_exec_count,
-                             l_total_time, l_longest_time)
-                        SELECT currval('pl_profiler_saved_s_id_seq') as s_id,
-                               L.func_oid, L.line_number,
-                               coalesce(S.source, '-- SOURCE NOT FOUND'),
-                               sum(L.exec_count), sum(L.total_time),
-                               max(L.longest_time)
-                        FROM pl_profiler_linestats(false) L
-                        JOIN pl_profiler_funcs_source(pl_profiler_func_oids_current()) S
-                            ON S.func_oid = L.func_oid
-                            AND S.line_number = L.line_number
-                        GROUP BY s_id, L.func_oid, L.line_number, S.source
-                        ORDER BY s_id, L.func_oid, L.line_number""")
-        if cur.rowcount == 0:
-            self.dbconn.rollback()
-            raise Exception("No plprofiler data to save")
-
-        cur.execute("""INSERT INTO pl_profiler_saved_callgraph
-                            (c_s_id, c_stack, c_call_count, c_us_total,
-                             c_us_children, c_us_self)
-                        SELECT currval('pl_profiler_saved_s_id_seq') as s_id,
-                               pl_profiler_get_stack(stack),
-                               sum(call_count), sum(us_total),
-                               sum(us_children), sum(us_self)
-                        FROM pl_profiler_callgraph(false)
-                        GROUP BY s_id, stack
-                        ORDER BY s_id, stack;""")
 
         cur.execute("""RESET search_path""")
         cur.close()
@@ -328,179 +339,7 @@ class plprofiler:
             self.dbconn.commit()
         cur.close()
 
-    def get_report_data(self, opt_name, opt_top, func_oids):
-        cur = self.dbconn.cursor()
-        cur.execute("""SET search_path TO %s""", (self.profiler_namespace, ))
-
-        # ----
-        # Create a default config.
-        # ----
-        if opt_name is None:
-            opt_name = "collected_data"
-        config = {
-                'name': opt_name,
-                'title': 'PL Profiler Report for %s' %(opt_name, ),
-                'tabstop': '8',
-                'svg_width': '1200',
-                'table_width': '80%',
-                'desc': '<h1>PL Profiler Report for %s</h1>' %(opt_name, ),
-            }
-
-        # ----
-        # If not specified, find the top N functions by self time.
-        # ----
-        found_more_funcs = False
-        if func_oids is None or len(func_oids) == 0:
-            func_oids_by_user = False
-            func_oids = []
-            cur.execute("""SELECT stack[array_upper(stack, 1)] as func_oid,
-                                sum(us_self) as us_self
-                            FROM pl_profiler_callgraph_data C
-                            GROUP BY func_oid
-                            ORDER BY us_self DESC
-                            LIMIT %s""", (opt_top + 1, ))
-            for row in cur:
-                func_oids.append(int(row[0]))
-            if len(func_oids) > opt_top:
-                func_oids = func_oids[:-1]
-                found_more_funcs = True
-        else:
-            func_oids_by_user = True
-            func_oids = [int(x) for x in func_oids]
-
-        # ----
-        # Get an alphabetically sorted list of the selected functions.
-        # ----
-        cur.execute("""SELECT P.oid, N.nspname, P.proname
-                        FROM pg_catalog.pg_proc P
-                        JOIN pg_catalog.pg_namespace N ON N.oid = P.pronamespace
-                        WHERE P.oid IN (SELECT * FROM unnest(%s::oid[]))
-                        ORDER BY upper(nspname), nspname,
-                                 upper(proname), proname""", (func_oids, ))
-
-        func_list = []
-        for row in cur:
-            func_list.append({
-                    'funcoid':  str(row[0]),
-                    'schema': str(row[1]),
-                    'funcname': str(row[2]),
-                })
-
-        # ----
-        # The view for linestats is extremely inefficient. We select
-        # all of it once and cache it in a hash table.
-        # ----
-        linestats = {}
-        cur.execute("""SELECT L.func_oid, L.line_number,
-                            sum(L.exec_count)::bigint AS exec_count,
-                            sum(L.total_time)::bigint AS total_time,
-                            max(L.longest_time)::bigint AS longest_time,
-                            S.source
-                        FROM pl_profiler_linestats_data L
-                        JOIN pl_profiler_funcs_source(ARRAY(
-                                    SELECT DISTINCT func_oid
-                                        FROM pl_profiler_linestats_data
-                                )) S
-                            ON S.func_oid = L.func_oid
-                            AND S.line_number = L.line_number
-                        GROUP BY L.func_oid, L.line_number, S.source
-                        ORDER BY L.func_oid, L.line_number""")
-        for row in cur:
-            if row[0] not in linestats:
-                linestats[row[0]] = []
-            linestats[row[0]].append(row)
-
-        # ----
-        # Build a list of function definitions in the order, specified
-        # by the func_oids list. This is either the oids, requested by
-        # the user or the oids determined above in descending order of
-        # self_time.
-        # ----
-        func_defs = []
-        for func_oid in func_oids:
-            # ----
-            # First get the function definition and overall stats.
-            # ----
-            cur.execute("""WITH SELF AS (SELECT
-                                stack[array_upper(stack, 1)] as func_oid,
-                                    sum(us_self) as us_self
-                                FROM pl_profiler_callgraph_data
-                                GROUP BY func_oid)
-                        SELECT P.oid, N.nspname, P.proname,
-                            pg_catalog.pg_get_function_result(P.oid),
-                            pg_catalog.pg_get_function_arguments(P.oid),
-                            coalesce(SELF.us_self, 0) as self_time
-                            FROM pg_catalog.pg_proc P
-                            JOIN pg_catalog.pg_namespace N ON N.oid = P.pronamespace
-                            LEFT JOIN SELF ON SELF.func_oid = P.oid
-                            WHERE P.oid = %s""",
-                        (func_oid, ))
-            row = cur.fetchone()
-            if row is None:
-                raise Exception("function with Oid %d not found\n" %func_oid)
-
-            # ----
-            # With that we can start the definition.
-            # ----
-            func_def = {
-                    'funcoid': func_oid,
-                    'schema': row[1],
-                    'funcname': row[2],
-                    'funcresult': row[3],
-                    'funcargs': row[4],
-                    'total_time': linestats[func_oid][0][3],
-                    'self_time': int(row[5]),
-                    'source': [],
-                }
-
-            # ----
-            # Add all the source code lines to that.
-            # ----
-            for row in linestats[func_oid]:
-                func_def['source'].append({
-                        'line_number': int(row[1]),
-                        'source': row[5],
-                        'exec_count': int(row[2]),
-                        'total_time': int(row[3]),
-                        'longest_time': int(row[4]),
-                    })
-
-            # ----
-            # Add this function to the list of function definitions.
-            # ----
-            func_defs.append(func_def)
-
-        # ----
-        # Get the callgraph data for building the flamegraph as well as
-        # for export.
-        # ----
-        cur.execute("""SELECT array_to_string(pl_profiler_get_stack(stack), ';'),
-                            stack,
-                            call_count, us_total, us_children, us_self
-                        FROM pl_profiler_callgraph_data""")
-        flamedata = ""
-        callgraph = []
-        for row in cur:
-            flamedata += str(row[0]) + " " + str(row[5]) + "\n"
-            callgraph.append(row[1:])
-
-        # ----
-        # That is it. Reset things and return the report data.
-        # ----
-        cur.execute("""RESET search_path""");
-        self.dbconn.rollback()
-
-        return {
-                'config': config,
-                'func_list': func_list,
-                'func_defs': func_defs,
-                'flamedata': flamedata,
-                'callgraph': callgraph,
-                'func_oids_by_user': func_oids_by_user,
-                'found_more_funcs': found_more_funcs,
-            }
-
-    def get_current_report_data(self, opt_name, opt_top, func_oids):
+    def get_local_report_data(self, opt_name, opt_top, func_oids):
         cur = self.dbconn.cursor()
         cur.execute("""SET search_path TO %s""", (self.profiler_namespace, ))
 
@@ -525,7 +364,7 @@ class plprofiler:
             func_oids = []
             cur.execute("""SELECT stack[array_upper(stack, 1)] as func_oid,
                                 sum(us_self) as us_self
-                            FROM pl_profiler_callgraph(false) C
+                            FROM pl_profiler_callgraph_local() C
                             GROUP BY func_oid
                             ORDER BY us_self DESC
                             LIMIT %s""", (opt_top + 1, ))
@@ -566,8 +405,8 @@ class plprofiler:
                             sum(L.total_time)::bigint AS total_time,
                             max(L.longest_time)::bigint AS longest_time,
                             S.source
-                        FROM pl_profiler_linestats(false) L
-                        JOIN pl_profiler_funcs_source(pl_profiler_func_oids_current()) S
+                        FROM pl_profiler_linestats_local() L
+                        JOIN pl_profiler_funcs_source(pl_profiler_func_oids_local()) S
                             ON S.func_oid = L.func_oid
                             AND S.line_number = L.line_number
                         GROUP BY L.func_oid, L.line_number, S.source
@@ -591,7 +430,7 @@ class plprofiler:
             cur.execute("""WITH SELF AS (SELECT
                                 stack[array_upper(stack, 1)] as func_oid,
                                     sum(us_self) as us_self
-                                FROM pl_profiler_callgraph(false)
+                                FROM pl_profiler_callgraph_local()
                                 GROUP BY func_oid)
                         SELECT P.oid, N.nspname, P.proname,
                             pg_catalog.pg_get_function_result(P.oid),
@@ -643,7 +482,7 @@ class plprofiler:
         cur.execute("""SELECT array_to_string(pl_profiler_get_stack(stack), ';'),
                             stack,
                             call_count, us_total, us_children, us_self
-                        FROM pl_profiler_callgraph(false)""")
+                        FROM pl_profiler_callgraph_local()""")
         flamedata = ""
         callgraph = []
         for row in cur:
@@ -658,6 +497,188 @@ class plprofiler:
 
         return {
                 'config': config,
+                'callgraph_overflow': False,
+                'functions_overflow': False,
+                'lines_overflow': False,
+                'func_list': func_list,
+                'func_defs': func_defs,
+                'flamedata': flamedata,
+                'callgraph': callgraph,
+                'func_oids_by_user': func_oids_by_user,
+                'found_more_funcs': found_more_funcs,
+            }
+
+    def get_shared_report_data(self, opt_name, opt_top, func_oids):
+        cur = self.dbconn.cursor()
+        cur.execute("""SET search_path TO %s""", (self.profiler_namespace, ))
+
+        # ----
+        # Create a default config.
+        # ----
+        config = {
+                'name': opt_name,
+                'title': 'PL Profiler Report for %s' %(opt_name, ),
+                'tabstop': '8',
+                'svg_width': '1200',
+                'table_width': '80%',
+                'desc': '<h1>PL Profiler Report for %s</h1>' %(opt_name, ),
+            }
+
+        # ----
+        # If not specified, find the top N functions by self time.
+        # ----
+        found_more_funcs = False
+        if func_oids is None or len(func_oids) == 0:
+            func_oids_by_user = False
+            func_oids = []
+            cur.execute("""SELECT stack[array_upper(stack, 1)] as func_oid,
+                                sum(us_self) as us_self
+                            FROM pl_profiler_callgraph_shared() C
+                            GROUP BY func_oid
+                            ORDER BY us_self DESC
+                            LIMIT %s""", (opt_top + 1, ))
+            for row in cur:
+                func_oids.append(int(row[0]))
+            if len(func_oids) > opt_top:
+                func_oids = func_oids[:-1]
+                found_more_funcs = True
+        else:
+            func_oids_by_user = True
+            func_oids = [int(x) for x in func_oids]
+
+        # ----
+        # Get an alphabetically sorted list of the selected functions.
+        # ----
+        cur.execute("""SELECT P.oid, N.nspname, P.proname
+                        FROM pg_catalog.pg_proc P
+                        JOIN pg_catalog.pg_namespace N ON N.oid = P.pronamespace
+                        WHERE P.oid IN (SELECT * FROM unnest(%s))
+                        ORDER BY upper(nspname), nspname,
+                                 upper(proname), proname""", (func_oids, ))
+
+        func_list = []
+        for row in cur:
+            func_list.append({
+                    'funcoid':  str(row[0]),
+                    'schema': str(row[1]),
+                    'funcname': str(row[2]),
+                })
+
+        # ----
+        # The view for linestats is extremely inefficient. We select
+        # all of it once and cache it in a hash table.
+        # ----
+        linestats = {}
+        cur.execute("""SELECT L.func_oid, L.line_number,
+                            sum(L.exec_count)::bigint AS exec_count,
+                            sum(L.total_time)::bigint AS total_time,
+                            max(L.longest_time)::bigint AS longest_time,
+                            S.source
+                        FROM pl_profiler_linestats_shared() L
+                        JOIN pl_profiler_funcs_source(pl_profiler_func_oids_shared()) S
+                            ON S.func_oid = L.func_oid
+                            AND S.line_number = L.line_number
+                        GROUP BY L.func_oid, L.line_number, S.source
+                        ORDER BY L.func_oid, L.line_number""")
+        for row in cur:
+            if row[0] not in linestats:
+                linestats[row[0]] = []
+            linestats[row[0]].append(row)
+
+        # ----
+        # Build a list of function definitions in the order, specified
+        # by the func_oids list. This is either the oids, requested by
+        # the user or the oids determined above in descending order of
+        # self_time.
+        # ----
+        func_defs = []
+        for func_oid in func_oids:
+            # ----
+            # First get the function definition and overall stats.
+            # ----
+            cur.execute("""WITH SELF AS (SELECT
+                                stack[array_upper(stack, 1)] as func_oid,
+                                    sum(us_self) as us_self
+                                FROM pl_profiler_callgraph_shared()
+                                GROUP BY func_oid)
+                        SELECT P.oid, N.nspname, P.proname,
+                            pg_catalog.pg_get_function_result(P.oid),
+                            pg_catalog.pg_get_function_arguments(P.oid),
+                            coalesce(SELF.us_self, 0) as self_time
+                            FROM pg_catalog.pg_proc P
+                            JOIN pg_catalog.pg_namespace N ON N.oid = P.pronamespace
+                            LEFT JOIN SELF ON SELF.func_oid = P.oid
+                            WHERE P.oid = %s""",
+                        (func_oid, ))
+            row = cur.fetchone()
+            if row is None:
+                raise Exception("function with Oid %d not found\n" %func_oid)
+
+            # ----
+            # With that we can start the definition.
+            # ----
+            func_def = {
+                    'funcoid': func_oid,
+                    'schema': row[1],
+                    'funcname': row[2],
+                    'funcresult': row[3],
+                    'funcargs': row[4],
+                    'total_time': linestats[func_oid][0][3],
+                    'self_time': int(row[5]),
+                    'source': [],
+                }
+
+            # ----
+            # Add all the source code lines to that.
+            # ----
+            for row in linestats[func_oid]:
+                func_def['source'].append({
+                        'line_number': int(row[1]),
+                        'source': row[5],
+                        'exec_count': int(row[2]),
+                        'total_time': int(row[3]),
+                        'longest_time': int(row[4]),
+                    })
+
+            # ----
+            # Add this function to the list of function definitions.
+            # ----
+            func_defs.append(func_def)
+
+        # ----
+        # Get the callgraph data.
+        # ----
+        cur.execute("""SELECT array_to_string(pl_profiler_get_stack(stack), ';'),
+                            stack,
+                            call_count, us_total, us_children, us_self
+                        FROM pl_profiler_callgraph_shared()""")
+        flamedata = ""
+        callgraph = []
+        for row in cur:
+            flamedata += str(row[0]) + " " + str(row[5]) + "\n"
+            callgraph.append(row[1:])
+
+        # ----
+        # Get the status of the overflow flags.
+        # ----
+        cur.execute("""SELECT
+                pl_profiler_callgraph_overflow(),
+                pl_profiler_functions_overflow(),
+                pl_profiler_lines_overflow()
+            """)
+        overflow_flags = cur.fetchone()
+
+        # ----
+        # That is it. Reset things and return the report data.
+        # ----
+        cur.execute("""RESET search_path""");
+        self.dbconn.rollback()
+
+        return {
+                'config': config,
+                'callgraph_overflow': overflow_flags[0],
+                'functions_overflow': overflow_flags[1],
+                'lines_overflow': overflow_flags[2],
                 'func_list': func_list,
                 'func_defs': func_defs,
                 'flamedata': flamedata,
@@ -840,7 +861,7 @@ class plprofiler:
         cur = self.dbconn.cursor()
         cur.execute("""SET search_path TO %s""", (self.profiler_namespace, ))
         cur.execute("""SELECT pl_profiler_enable(true)""")
-        cur.execute("""SET plprofiler.save_interval TO 0""")
+        cur.execute("""SET plprofiler.collect_interval TO 0""")
         cur.execute("""RESET search_path""")
         self.dbconn.commit()
         cur.close()
@@ -849,7 +870,7 @@ class plprofiler:
         cur = self.dbconn.cursor()
         cur.execute("""SET search_path TO %s""", (self.profiler_namespace, ))
         cur.execute("""SELECT pl_profiler_enable(false)""")
-        cur.execute("""RESET plprofiler.save_interval""")
+        cur.execute("""RESET plprofiler.collect_interval""")
         cur.execute("""RESET search_path""")
         self.dbconn.commit()
         cur.close()
@@ -880,7 +901,7 @@ class plprofiler:
             cur.execute("""ALTER SYSTEM SET plprofiler.enable_pid TO %s""", (opt_pid, ))
         else:
             cur.execute("""ALTER SYSTEM SET plprofiler.enabled TO on""")
-        cur.execute("""ALTER SYSTEM SET plprofiler.save_interval TO %s""", (opt_interval, ))
+        cur.execute("""ALTER SYSTEM SET plprofiler.collect_interval TO %s""", (opt_interval, ))
         cur.execute("""SELECT pg_catalog.pg_reload_conf()""")
         self.dbconn.autocommit = False
         cur.close()
@@ -890,32 +911,31 @@ class plprofiler:
         cur = self.dbconn.cursor()
         cur.execute("""ALTER SYSTEM RESET plprofiler.enable_pid""")
         cur.execute("""ALTER SYSTEM RESET plprofiler.enabled""")
-        cur.execute("""ALTER SYSTEM RESET plprofiler.save_interval""");
+        cur.execute("""ALTER SYSTEM RESET plprofiler.collect_interval""");
         cur.execute("""SELECT pg_catalog.pg_reload_conf()""")
         self.dbconn.autocommit = False
         cur.close()
 
-    def reset_current(self):
+    def reset_local(self):
         cur = self.dbconn.cursor()
         cur.execute("""SET search_path TO %s""", (self.profiler_namespace, ))
-        cur.execute("""SELECT pl_profiler_reset()""")
+        cur.execute("""SELECT pl_profiler_reset_local()""")
         cur.execute("""RESET search_path""")
         self.dbconn.commit()
         cur.close()
 
-    def reset_data(self):
+    def reset_shared(self):
         cur = self.dbconn.cursor()
         cur.execute("""SET search_path TO %s""", (self.profiler_namespace, ))
-        cur.execute("""TRUNCATE pl_profiler_linestats_data""")
-        cur.execute("""TRUNCATE pl_profiler_callgraph_data""")
+        cur.execute("""SELECT pl_profiler_reset_shared()""")
         cur.execute("""RESET search_path""")
         self.dbconn.commit()
         cur.close()
 
-    def save_current_stats(self):
+    def save_collect_data(self):
         cur = self.dbconn.cursor()
         cur.execute("""SET search_path TO %s""", (self.profiler_namespace, ))
-        cur.execute("""SELECT pl_profiler_save_stats()""")
+        cur.execute("""SELECT pl_profiler_collect_data()""")
         cur.execute("""RESET search_path""")
         self.dbconn.commit()
         cur.close()

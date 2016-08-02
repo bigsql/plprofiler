@@ -31,9 +31,11 @@ static void profiler_stmt_end(PLpgSQL_execstate *estate, PLpgSQL_stmt *stmt);
 /**********************************************************************
  * Local function prototypes
  **********************************************************************/
+static Size profiler_shmem_size(void);
+static void profiler_shmem_startup(void);
+static void init_hash_tables(void);
 static char *find_source(Oid oid, HeapTuple *tup, char **funcName);
 static int count_source_lines(const char *src);
-static void init_hash_tables(void);
 static uint32 line_hash_fn(const void *key, Size keysize);
 static int line_match_fn(const void *key1, const void *key2, Size keysize);
 static uint32 callgraph_hash_fn(const void *key, Size keysize);
@@ -45,33 +47,38 @@ static void callgraph_check(Oid func_oid);
 static void callgraph_collect(uint64 us_elapsed, uint64 us_self,
 							  uint64 us_children);
 static void profiler_enabled_assign(bool newval, void *extra);
-static void profiler_collect_data(void);
-static Oid get_extension_schema(Oid ext_oid);
+static int32 profiler_collect_data(void);
+static void profiler_xact_callback(XactEvent event, void *arg);
 
 /**********************************************************************
  * Local variables
  **********************************************************************/
 
 static MemoryContext	profiler_mcxt = NULL;
-static HTAB			   *linestats_hash = NULL;
+static HTAB			   *functions_hash = NULL;
 static HTAB			   *callgraph_hash = NULL;
+static profilerSharedState *profiler_shared_state = NULL;
+static HTAB			   *functions_shared = NULL;
+static HTAB			   *callgraph_shared = NULL;
 
 static bool				profiler_enabled = false;
 static int				profiler_enable_pid = 0;
-static char			   *profiler_namespace = NULL;
-static int				profiler_save_interval = 0;
-static char			   *profiler_save_line_table = NULL;
-static char			   *profiler_save_callgraph_table = NULL;
+static int				profiler_collect_interval = 0;
+static int				profiler_max_functions = PL_MIN_FUNCTIONS;
+static int				profiler_max_lines = PL_MIN_LINES;
+static int				profiler_max_callgraph = PL_MIN_CALLGRAPH;
 
 static callGraphKey		graph_stack;
 static instr_time		graph_stack_entry[PL_MAX_STACK_DEPTH];
 static uint64			graph_stack_child_time[PL_MAX_STACK_DEPTH];
 static int				graph_stack_pt = 0;
 static TransactionId	graph_current_xid = InvalidTransactionId;
-static time_t			last_save_time = 0;
+static time_t			last_collect_time = 0;
+static bool				have_new_local_data = false;
 
-PLpgSQL_plugin		   *prev_plpgsql_plugin = NULL;
-PLpgSQL_plugin		   *prev_pltsql_plugin = NULL;
+static PLpgSQL_plugin  *prev_plpgsql_plugin = NULL;
+static PLpgSQL_plugin  *prev_pltsql_plugin = NULL;
+static shmem_startup_hook_type	prev_shmem_startup_hook = NULL;
 
 static PLpgSQL_plugin	plugin_funcs = {
 		profiler_func_init,
@@ -118,40 +125,14 @@ _PG_init(void)
 							NULL,
 							NULL);
 
-	DefineCustomIntVariable("plprofiler.save_interval",
+	DefineCustomIntVariable("plprofiler.collect_interval",
 							"Interval in seconds for saving profiler stats "
 							"in the permanent tables.",
 							NULL,
-							&profiler_save_interval,
+							&profiler_collect_interval,
 							0,
 							0,
 							3600,
-							PGC_USERSET,
-							0,
-							NULL,
-							NULL,
-							NULL);
-
-	DefineCustomStringVariable("plprofiler.save_linestats_table",
-							"The table in which the pl_profiler_collect_data() "
-							"function (and the interval saving) will insert "
-							"per source line stats into",
-							NULL,
-							&profiler_save_line_table,
-							"pl_profiler_linestats_data",
-							PGC_USERSET,
-							0,
-							NULL,
-							NULL,
-							NULL);
-
-	DefineCustomStringVariable("plprofiler.save_callgraph_table",
-							"The table in which the pl_profiler_collect_data() "
-							"function (and the interval saving) will insert "
-							"call graph stats into",
-							NULL,
-							&profiler_save_callgraph_table,
-							"pl_profiler_callgraph_data",
 							PGC_USERSET,
 							0,
 							NULL,
@@ -171,8 +152,73 @@ _PG_init(void)
 	/* Initialize local hash tables. */
 	init_hash_tables();
 
-	/* Set the database OID in the local call graph stack hash key. */
-	graph_stack.db_oid = MyDatabaseId;
+	if (process_shared_preload_libraries_in_progress)
+	{
+		/*
+		 * When loaded via shared_preload_libraries, we have to
+		 * also hook into the shmem_startup call chain and register
+		 * a callback at transaction end.
+		 */
+		prev_shmem_startup_hook = shmem_startup_hook;
+		shmem_startup_hook = profiler_shmem_startup;
+
+		RegisterXactCallback(profiler_xact_callback, NULL);
+
+		/*
+		 * Additional config options only available if running via
+		 * shared_preload_libraries. These all affect the amount of
+		 * shared memory used by the extension, so they only make
+		 * sense as PGC_POSTMASTER.
+		 */
+		DefineCustomIntVariable("plprofiler.max_functions",
+								"Maximum number of functions that can be "
+								"tracked in shared memory when using "
+								"plprofiler.collect_in_shmem",
+								NULL,
+								&profiler_max_functions,
+								PL_MIN_FUNCTIONS,
+								PL_MIN_FUNCTIONS,
+								INT_MAX,
+								PGC_POSTMASTER,
+								0,
+								NULL,
+								NULL,
+								NULL);
+
+		DefineCustomIntVariable("plprofiler.max_lines",
+								"Maximum number of source lines that can be "
+								"tracked in shared memory when using "
+								"plprofiler.collect_in_shmem",
+								NULL,
+								&profiler_max_lines,
+								PL_MIN_LINES,
+								PL_MIN_LINES,
+								INT_MAX,
+								PGC_POSTMASTER,
+								0,
+								NULL,
+								NULL,
+								NULL);
+
+		DefineCustomIntVariable("plprofiler.max_callgraphs",
+								"Maximum number of call graphs that can be "
+								"tracked in shared memory when using "
+								"plprofiler.collect_in_shmem",
+								NULL,
+								&profiler_max_callgraph,
+								PL_MIN_CALLGRAPH,
+								PL_MIN_CALLGRAPH,
+								INT_MAX,
+								PGC_POSTMASTER,
+								0,
+								NULL,
+								NULL,
+								NULL);
+
+		/* Request the additionl shared memory and LWLock needed. */
+		RequestAddinShmemSpace(profiler_shmem_size());
+		RequestAddinLWLocks(1);
+	}
 }
 
 void
@@ -190,8 +236,41 @@ _PG_fini(void)
 
 	MemoryContextDelete(profiler_mcxt);
 	profiler_mcxt = NULL;
-	linestats_hash = NULL;
+	functions_hash = NULL;
 	callgraph_hash = NULL;
+
+	if (prev_shmem_startup_hook != NULL)
+	{
+		shmem_startup_hook = prev_shmem_startup_hook;
+		prev_shmem_startup_hook = NULL;
+
+		UnregisterXactCallback(profiler_xact_callback, NULL);
+	}
+}
+
+/* -------------------------------------------------------------------
+ * profiler_shmem_size()
+ *
+ * 	Calculate the amount of shared memory the profiler needs to
+ * 	keep functions, callgraphs and line statistics globally.
+ * -------------------------------------------------------------------
+ */
+static Size
+profiler_shmem_size(void)
+{
+	Size	num_bytes;
+
+	num_bytes = offsetof(profilerSharedState, line_info);
+	num_bytes = add_size(num_bytes,
+						 sizeof(linestatsLineInfo) * profiler_max_lines);
+	num_bytes = add_size(num_bytes,
+						 hash_estimate_size(profiler_max_functions,
+						 					sizeof(linestatsEntry)));
+	num_bytes = add_size(num_bytes,
+						 hash_estimate_size(profiler_max_callgraph,
+						 					sizeof(callGraphEntry)));
+
+	return num_bytes;
 }
 
 /**********************************************************************
@@ -231,7 +310,7 @@ profiler_func_init(PLpgSQL_execstate *estate, PLpgSQL_function *func )
 		 * stats in the permanent tables, then turn it off again. At that
 		 * moment, we want to release all profiler resources.
 		 */
-		if (linestats_hash != NULL)
+		if (functions_hash != NULL)
 			init_hash_tables();
 		return;
 	}
@@ -243,6 +322,8 @@ profiler_func_init(PLpgSQL_execstate *estate, PLpgSQL_function *func )
 	if (func->fn_oid == InvalidOid)
 		return;
 
+	/* Tell collect_data() that new information has arrived locally. */
+	have_new_local_data = true;
 
 	/*
 	 * Search for this function in our line stats hash table. Create the
@@ -251,7 +332,7 @@ profiler_func_init(PLpgSQL_execstate *estate, PLpgSQL_function *func )
 	linestats_key.db_oid = MyDatabaseId;
 	linestats_key.fn_oid = func->fn_oid;
 
-	linestats_entry = (linestatsEntry *)hash_search(linestats_hash,
+	linestats_entry = (linestatsEntry *)hash_search(functions_hash,
 													&linestats_key,
 													HASH_ENTER,
 													&linestats_found);
@@ -266,9 +347,9 @@ profiler_func_init(PLpgSQL_execstate *estate, PLpgSQL_function *func )
 		char		   *func_name;
 
 		proc_src = find_source( func->fn_oid, &proc_tuple, &func_name );
-		linestats_entry->line_count = count_source_lines(proc_src);
+		linestats_entry->line_count = count_source_lines(proc_src) + 1;
 		old_context = MemoryContextSwitchTo(profiler_mcxt);
-		linestats_entry->line_info = palloc0((linestats_entry->line_count + 1) *
+		linestats_entry->line_info = palloc0(linestats_entry->line_count *
 											 sizeof(linestatsLineInfo));
 		MemoryContextSwitchTo(old_context);
 
@@ -286,7 +367,7 @@ profiler_func_init(PLpgSQL_execstate *estate, PLpgSQL_function *func )
 
 	profiler_info->fn_oid = func->fn_oid;
 	profiler_info->line_count = linestats_entry->line_count;
-	profiler_info->line_info = palloc0((profiler_info->line_count + 1) *
+	profiler_info->line_info = palloc0(profiler_info->line_count *
 									  sizeof(profilerLineInfo));
 
 	estate->plugin_info = profiler_info;
@@ -316,12 +397,8 @@ profiler_func_beg(PLpgSQL_execstate *estate, PLpgSQL_function *func)
 	if (estate->plugin_info == NULL)
 		return;
 
-	/*
-	 * At entry time of a function we push it onto the graph call stack
-	 * and remember the entry time.
-	 */
+	/* Sanity check for the call stack. */
 	current_xid = GetTopTransactionId();
-
 	if (graph_current_xid != current_xid && graph_stack_pt > 0)
 	{
 		/*
@@ -330,8 +407,7 @@ profiler_func_beg(PLpgSQL_execstate *estate, PLpgSQL_function *func)
 		 * is not properly unwound down to zero depth. Unwind it here.
 		 */
 		elog(DEBUG1, "plprofiler: stale call stack reset");
-		while (graph_stack_pt > 0)
-			callgraph_pop_one(func->fn_oid);
+		callgraph_pop_one(InvalidOid);
 	}
 	graph_current_xid = current_xid;
 
@@ -364,19 +440,21 @@ profiler_func_end(PLpgSQL_execstate *estate, PLpgSQL_function *func)
 	if (estate->plugin_info == NULL)
 		return;
 
-	profiler_info = (profilerInfo *) estate->plugin_info;
+	/* Tell collect_data() that new information has arrived locally. */
+	have_new_local_data = true;
 
 	/* Find the linestats hash table entry for this function. */
+	profiler_info = (profilerInfo *) estate->plugin_info;
 	key.db_oid = MyDatabaseId;
 	key.fn_oid = func->fn_oid;
-	entry = (linestatsEntry *)hash_search(linestats_hash, &key,
+	entry = (linestatsEntry *)hash_search(functions_hash, &key,
 										  HASH_FIND, NULL);
 	if (!entry)
 		elog(ERROR, "plprofiler: local linestats entry for fn_oid %u "
 					"not found", func->fn_oid);
 
 	/* Loop through each line of source code and update the stats */
-	for(i = 0; i <= profiler_info->line_count; i++)
+	for(i = 0; i < profiler_info->line_count; i++)
 	{
 		entry->line_info[i].exec_count +=
 				profiler_info->line_info[i].exec_count;
@@ -395,18 +473,18 @@ profiler_func_end(PLpgSQL_execstate *estate, PLpgSQL_function *func)
 	callgraph_pop(func->fn_oid);
 
 	/*
-	 * Finally if a plprofiler.save_interval is configured, save and reset
+	 * Finally if a plprofiler.collect_interval is configured, save and reset
 	 * the stats if the interval has elapsed.
 	 */
 	if ((profiler_enabled || MyProcPid == profiler_enable_pid)
-			&& profiler_save_interval > 0)
+			&& profiler_collect_interval > 0)
 	{
 		time_t	now = time(NULL);
 
-		if (now >= last_save_time + profiler_save_interval)
+		if (now >= last_collect_time + profiler_collect_interval)
 		{
 		    profiler_collect_data();
-			last_save_time = now;
+			last_collect_time = now;
 		}
 	}
 }
@@ -481,6 +559,9 @@ profiler_stmt_end(PLpgSQL_execstate *estate, PLpgSQL_stmt *stmt)
 	if (stmt->lineno > profiler_info->line_count)
 		return;
 
+	/* Tell collect_data() that new information has arrived locally. */
+	have_new_local_data = true;
+
 	line_info = profiler_info->line_info + stmt->lineno;
 
 	INSTR_TIME_SET_CURRENT(end_time);
@@ -498,6 +579,125 @@ profiler_stmt_end(PLpgSQL_execstate *estate, PLpgSQL_stmt *stmt)
 /**********************************************************************
  * Helper functions
  **********************************************************************/
+
+/* -------------------------------------------------------------------
+ * init_hash_tables()
+ *
+ * Initialize hash table
+ * -------------------------------------------------------------------
+ */
+static void
+init_hash_tables(void)
+{
+	HASHCTL		hash_ctl;
+
+	/* Create the memory context for our data */
+	if (profiler_mcxt != NULL)
+	{
+		if (profiler_mcxt->isReset)
+			return;
+		MemoryContextReset(profiler_mcxt);
+	}
+	else
+	{
+		profiler_mcxt = AllocSetContextCreate(TopMemoryContext,
+											  "PL/pgSQL profiler",
+											  ALLOCSET_DEFAULT_MINSIZE,
+											  ALLOCSET_DEFAULT_INITSIZE,
+											  ALLOCSET_DEFAULT_MAXSIZE);
+	}
+
+	/* Create the hash table for line stats */
+	MemSet(&hash_ctl, 0, sizeof(hash_ctl));
+
+	hash_ctl.keysize = sizeof(linestatsHashKey);
+	hash_ctl.entrysize = sizeof(linestatsEntry);
+	hash_ctl.hash = line_hash_fn;
+	hash_ctl.match = line_match_fn;
+	hash_ctl.hcxt = profiler_mcxt;
+
+	functions_hash = hash_create("Function Lines",
+				 10000,
+				 &hash_ctl,
+				 HASH_ELEM | HASH_FUNCTION | HASH_COMPARE);
+
+	/* Create the hash table for call stats */
+	MemSet(&hash_ctl, 0, sizeof(hash_ctl));
+
+	hash_ctl.keysize = sizeof(callGraphKey);
+	hash_ctl.entrysize = sizeof(callGraphEntry);
+	hash_ctl.hash = callgraph_hash_fn;
+	hash_ctl.match = callgraph_match_fn;
+	hash_ctl.hcxt = profiler_mcxt;
+
+	callgraph_hash = hash_create("Function Call Graphs",
+				 1000,
+				 &hash_ctl,
+				 HASH_ELEM | HASH_FUNCTION | HASH_COMPARE);
+}
+
+static void
+profiler_shmem_startup(void)
+{
+	bool					found;
+	profilerSharedState	   *plpss;
+	Size					plpss_size = 0;
+	HASHCTL					hash_ctl;
+
+	if (prev_shmem_startup_hook)
+	        prev_shmem_startup_hook();
+
+	/* Reset in case of restart inside of the postmaster. */
+	profiler_shared_state = NULL;
+	functions_shared = NULL;
+	callgraph_shared = NULL;
+
+	LWLockAcquire(AddinShmemInitLock, LW_EXCLUSIVE);
+
+	/* Create or attach to the shared state */
+	plpss_size = add_size(plpss_size,
+						  offsetof(profilerSharedState, line_info));
+	plpss_size = add_size(plpss_size,
+						  sizeof(linestatsLineInfo) * profiler_max_lines);
+	profiler_shared_state = ShmemInitStruct("plprofiler state", plpss_size,
+											&found);
+	plpss = profiler_shared_state;
+	if (!found)
+	{
+		memset(plpss, 0, offsetof(profilerSharedState, line_info) +
+						 sizeof(linestatsLineInfo) * profiler_max_lines);
+		plpss->lock = LWLockAssign();
+	}
+
+	/* (Re)Initialize local hash tables. */
+	init_hash_tables();
+
+	/* Create or attache to the shared functions hash table */
+	memset(&hash_ctl, 0, sizeof(hash_ctl));
+	hash_ctl.keysize = sizeof(linestatsHashKey);
+	hash_ctl.entrysize = sizeof(linestatsEntry);
+	hash_ctl.hash = line_hash_fn;
+	hash_ctl.match = line_match_fn;
+	functions_shared = ShmemInitHash("plprofiler functions",
+									 profiler_max_functions,
+									 profiler_max_functions,
+									 &hash_ctl,
+									 HASH_ELEM | HASH_FUNCTION | HASH_COMPARE);
+
+	/* Create or attache to the shared callgraph hash table */
+	memset(&hash_ctl, 0, sizeof(hash_ctl));
+	hash_ctl.keysize = sizeof(callGraphKey);
+	hash_ctl.entrysize = sizeof(callGraphEntry);
+	hash_ctl.hash = callgraph_hash_fn;
+	hash_ctl.match = callgraph_match_fn;
+	callgraph_shared = ShmemInitHash("plprofiler callgraph",
+									  profiler_max_callgraph,
+									  profiler_max_callgraph,
+									  &hash_ctl,
+									  HASH_ELEM | HASH_FUNCTION | HASH_COMPARE);
+
+	LWLockRelease(AddinShmemInitLock);
+}
 
 /* -------------------------------------------------------------------
  * find_source()
@@ -541,7 +741,7 @@ find_source(Oid oid, HeapTuple *tup, char **funcName)
 static int
 count_source_lines(const char *src)
 {
-	int			line_count = 0;
+	int			line_count = 1;
 	const char *cp = src;
 
 	while(cp != NULL)
@@ -553,62 +753,6 @@ count_source_lines(const char *src)
 	}
 
 	return line_count;
-}
-
-/* -------------------------------------------------------------------
- * init_hash_tables()
- *
- * Initialize hash table
- * -------------------------------------------------------------------
- */
-static void
-init_hash_tables(void)
-{
-	HASHCTL		hash_ctl;
-
-	/* Create the memory context for our data */
-	if (profiler_mcxt != NULL)
-	{
-		if (profiler_mcxt->isReset)
-			return;
-		MemoryContextReset(profiler_mcxt);
-	}
-	else
-	{
-		profiler_mcxt = AllocSetContextCreate(TopMemoryContext,
-											  "PL/pgSQL profiler",
-											  ALLOCSET_DEFAULT_MINSIZE,
-											  ALLOCSET_DEFAULT_INITSIZE,
-											  ALLOCSET_DEFAULT_MAXSIZE);
-	}
-
-	/* Create the hash table for line stats */
-	MemSet(&hash_ctl, 0, sizeof(hash_ctl));
-
-	hash_ctl.keysize = sizeof(linestatsHashKey);
-	hash_ctl.entrysize = sizeof(linestatsEntry);
-	hash_ctl.hash = line_hash_fn;
-	hash_ctl.match = line_match_fn;
-	hash_ctl.hcxt = profiler_mcxt;
-
-	linestats_hash = hash_create("Function Lines",
-				 10000,
-				 &hash_ctl,
-				 HASH_ELEM | HASH_FUNCTION | HASH_COMPARE);
-
-	/* Create the hash table for call stats */
-	MemSet(&hash_ctl, 0, sizeof(hash_ctl));
-
-	hash_ctl.keysize = sizeof(callGraphKey);
-	hash_ctl.entrysize = sizeof(callGraphEntry);
-	hash_ctl.hash = callgraph_hash_fn;
-	hash_ctl.match = callgraph_match_fn;
-	hash_ctl.hcxt = profiler_mcxt;
-
-	callgraph_hash = hash_create("Function Call Graphs",
-				 1000,
-				 &hash_ctl,
-				 HASH_ELEM | HASH_FUNCTION | HASH_COMPARE);
 }
 
 static uint32
@@ -717,7 +861,7 @@ callgraph_pop_one(Oid func_oid)
 	key.fn_oid = func_oid;
 	key.db_oid = MyDatabaseId;
 
-	entry = (linestatsEntry *)hash_search(linestats_hash, &key, HASH_FIND, NULL);
+	entry = (linestatsEntry *)hash_search(functions_hash, &key, HASH_FIND, NULL);
 
 	if (!entry)
 		elog(ERROR, "plprofiler: local linestats entry for fn_oid %u "
@@ -762,6 +906,7 @@ callgraph_collect(uint64 us_elapsed, uint64 us_self, uint64 us_children)
 	callGraphEntry *entry;
 	bool			found;
 
+	graph_stack.db_oid = MyDatabaseId;
 	entry = (callGraphEntry *)hash_search(callgraph_hash, &graph_stack,
 										  HASH_ENTER, &found);
 
@@ -787,57 +932,251 @@ profiler_enabled_assign(bool newval, void *extra)
 	profiler_enabled = newval;
 }
 
-static void
+static int32
 profiler_collect_data(void)
 {
-	SPI_push();
-	DirectFunctionCall1(pl_profiler_collect_data, (Datum)0);
-	SPI_pop();
+	HASH_SEQ_STATUS			hash_seq;
+	callGraphEntry		   *cge1;
+	callGraphEntry		   *cge2;
+	linestatsEntry		   *lse1;
+	linestatsEntry		   *lse2;
+	profilerSharedState	   *plpss = profiler_shared_state;
+	bool					have_exclusive_lock = false;
+	bool					found;
+	int						i;
+
+	/*
+	 * Return without doing anything if the plprofiler extension
+	 * was not loaded via shared_preload_libraries. We don't have
+	 * any shared memory state in that case.
+	 */
+	if (plpss == NULL)
+		return -1;
+
+	/*
+	 * Don't waste any time here if there was no new data recorded
+	 * since the last collect_data() call.
+	 */
+	if (!have_new_local_data)
+		return 0;
+	have_new_local_data = false;
+
+	/*
+	 * Acquire a shared lock on the shared hash tables. We escalate
+	 * to an exclusive lock later in case we need to add a new entry.
+	 */
+	LWLockAcquire(plpss->lock, LW_SHARED);
+
+	/* Collect the callgraph data into shared memory. */
+	hash_seq_init(&hash_seq, callgraph_hash);
+	while ((cge1 = hash_seq_search(&hash_seq)) != NULL)
+	{
+		cge2 = hash_search(callgraph_shared, &(cge1->key),
+						   HASH_FIND, NULL);
+		if (cge2 == NULL)
+		{
+			/*
+			 * This callgraph is not yet known in shared memory.
+			 * Need to escalate the lock to exclusive.
+			 */
+			if (!have_exclusive_lock)
+			{
+				LWLockRelease(plpss->lock);
+				LWLockAcquire(plpss->lock, LW_EXCLUSIVE);
+				have_exclusive_lock = true;
+			}
+
+			cge2 = hash_search(callgraph_shared, &(cge1->key),
+							   HASH_ENTER, &found);
+			if (cge2 == NULL)
+			{
+				/*
+				 * This means that we are out of shared memory for the
+				 * callgraph_shared hash table. Nothing we can do
+				 * here but complain.
+				 */
+				if (!plpss->callgraph_overflow)
+				{
+					elog(LOG,
+						 "plprofiler: entry limit reached for "
+						 "shared memory call graph data");
+					plpss->callgraph_overflow = true;
+				}
+				break;
+			}
+
+			/*
+			 * Since we released the lock above for lock escalation to
+			 * exclusive, it is possible that someone else in the meantime
+			 * created the entry for this call graph.
+			 */
+			if (!found)
+			{
+				/*
+				 * We created a new entry for this call graph in the
+				 * shared hash table. Initialize it.
+				 */
+				/* memcpy(&(cge2->key), &(cge1->key), sizeof(callGraphKey)); */
+				SpinLockInit(&(cge2->mutex));
+				cge2->callCount = 0;
+				cge2->totalTime = 0;
+				cge2->childTime = 0;
+				cge2->selfTime = 0;
+			}
+		}
+
+		/*
+		 * At this point we have the local entry in cge1 and the shared
+		 * entry in cge2. Since we may still only hold a shared lock on
+		 * the shared state, use a spinlock on the shared entry while
+		 * adding the counters. Then reset our local counters to zero.
+		 */
+		SpinLockAcquire(&(cge2->mutex));
+		cge2->callCount += cge1->callCount;
+		cge2->totalTime += cge1->totalTime;
+		cge2->childTime += cge1->childTime;
+		cge2->selfTime  += cge1->selfTime ;
+		SpinLockRelease(&(cge2->mutex));
+
+		cge1->callCount = 0;
+		cge1->totalTime = 0;
+		cge1->childTime = 0;
+		cge1->selfTime = 0;
+	}
+
+	/* Collect the linestats data into shared memory. */
+	hash_seq_init(&hash_seq, functions_hash);
+	while ((lse1 = hash_seq_search(&hash_seq)) != NULL)
+	{
+		lse2 = hash_search(functions_shared, &(lse1->key),
+						   HASH_FIND, NULL);
+		if (lse2 == NULL)
+		{
+			/*
+			 * This function is not yet known in shared memory.
+			 * Need to escalate the lock to exclusive.
+			 */
+			if (!have_exclusive_lock)
+			{
+				LWLockRelease(plpss->lock);
+				LWLockAcquire(plpss->lock, LW_EXCLUSIVE);
+				have_exclusive_lock = true;
+			}
+
+			lse2 = hash_search(functions_shared, &(lse1->key),
+							   HASH_ENTER, &found);
+			if (lse2 == NULL)
+			{
+				/*
+				 * This means that we are out of shared memory for the
+				 * functions_shared hash table. Nothing we can do
+				 * here but complain.
+				 */
+				if (!plpss->functions_overflow)
+				{
+					elog(LOG,
+						 "plprofiler: entry limit reached for "
+						 "shared memory functions data");
+					plpss->functions_overflow = true;
+				}
+				break;
+			}
+			if (memcmp(&(lse2->key), &(lse1->key), sizeof(linestatsHashKey)) != 0)
+			{
+				elog(FATAL, "key of new hash entry doesn't match");
+			}
+
+			/*
+			 * Since we released the lock above for lock escalation to
+			 * exclusive, it is possible that someone else in the meantime
+			 * created the entry for this function.
+			 */
+			if (!found)
+			{
+				/*
+				 * We created a new entry for this function in the
+				 * shared hash table. Initialize it. We also need to
+				 * allocate the per line counters here. If we run out
+				 * of per line counters in the shared state, we don't
+				 * keep count for any lines of this function at all.
+				 */
+				SpinLockInit(&(lse2->mutex));
+				if (lse1->line_count <= profiler_max_lines - plpss->lines_used)
+				{
+					lse2->line_count = lse1->line_count;
+					lse2->line_info = &(plpss->line_info[plpss->lines_used]);
+					plpss->lines_used += lse1->line_count;
+					memset(lse2->line_info, 0,
+						   sizeof(linestatsLineInfo) * lse1->line_count);
+				}
+				else
+				{
+					if (!plpss->lines_overflow)
+					{
+						elog(LOG,
+							 "plprofiler: entry limit reached for "
+							 "shared memory per source line data");
+						plpss->lines_overflow = true;
+					}
+					lse2->line_count = 0;
+					lse2->line_info = NULL;
+				}
+			}
+		}
+
+		/*
+		 * At this point we have the local entry in lse1 and the shared
+		 * entry in lse2. Since we may still only hold a shared lock on
+		 * the shared state, use a spinlock on the shared entry while
+		 * adding the counters.
+		 */
+		SpinLockAcquire(&(lse2->mutex));
+		for (i = 0; i < lse1->line_count && i < lse2->line_count; i++)
+		{
+			if (lse1->line_info[i].us_max > lse2->line_info[i].us_max)
+				lse2->line_info[i].us_max = lse1->line_info[i].us_max;
+			lse2->line_info[i].us_total += lse1->line_info[i].us_total;
+			lse2->line_info[i].exec_count += lse1->line_info[i].exec_count;
+		}
+		SpinLockRelease(&(lse2->mutex));
+
+		memset(lse1->line_info, 0,
+			   sizeof(linestatsLineInfo) * lse1->line_count);
+	}
+
+	/* All done, release the lock. */
+	LWLockRelease(plpss->lock);
+
+	return 0;
 }
 
-/* No idea why this one is static in extensions.c - Jan */
-/*
- * get_extension_schema - given an extension OID, fetch its extnamespace
- *
- * Returns InvalidOid if no such extension.
- */
-static Oid
-get_extension_schema(Oid ext_oid)
+static void
+profiler_xact_callback(XactEvent event, void *arg)
 {
-	Oid			result;
-	Relation	rel;
-	SysScanDesc scandesc;
-	HeapTuple	tuple;
-	ScanKeyData entry[1];
+	Assert(profiler_shared_state != NULL);
 
-	rel = heap_open(ExtensionRelationId, AccessShareLock);
+	/* Collect the statistics if needed. */
+	if ((profiler_enabled || MyProcPid == profiler_enable_pid) &&
+		profiler_collect_interval > 0)
+	{
+		switch (event)
+		{
+			case XACT_EVENT_COMMIT:
+			case XACT_EVENT_ABORT:
+			#if PG_VERSION_NUM >= 90500
+			case XACT_EVENT_PARALLEL_COMMIT:
+			case XACT_EVENT_PARALLEL_ABORT:
+			#endif
+				profiler_collect_data();
+				break;
 
-	ScanKeyInit(&entry[0],
-				ObjectIdAttributeNumber,
-				BTEqualStrategyNumber, F_OIDEQ,
-				ObjectIdGetDatum(ext_oid));
+			default:
+				break;
+		}
+	}
 
-#if PG_VERSION_NUM < 90400
-	scandesc = systable_beginscan(rel, ExtensionOidIndexId, true,
-								  SnapshotNow, 1, entry);
-#else
-	scandesc = systable_beginscan(rel, ExtensionOidIndexId, true,
-								  NULL, 1, entry);
-#endif
-
-	tuple = systable_getnext(scandesc);
-
-	/* We assume that there can be at most one matching tuple */
-	if (HeapTupleIsValid(tuple))
-		result = ((Form_pg_extension) GETSTRUCT(tuple))->extnamespace;
-	else
-		result = InvalidOid;
-
-	systable_endscan(scandesc);
-
-	heap_close(rel, AccessShareLock);
-
-	return result;
+	/* We can also unwind the callstack here in case of abort. */
+	callgraph_check(InvalidOid);
 }
 
 /**********************************************************************
@@ -908,14 +1247,14 @@ pl_profiler_get_stack(PG_FUNCTION_ARGS)
 }
 
 /* -------------------------------------------------------------------
- * pl_profiler_linestats()
+ * pl_profiler_linestats_local()
  *
- *	Returns the current content of the line stats hash table
+ *	Returns the content of the local line stats hash table
  *	as a set of rows.
  * -------------------------------------------------------------------
  */
 Datum
-pl_profiler_linestats(PG_FUNCTION_ARGS)
+pl_profiler_linestats_local(PG_FUNCTION_ARGS)
 {
 	ReturnSetInfo	   *rsinfo = (ReturnSetInfo *)fcinfo->resultinfo;
 	TupleDesc			tupdesc;
@@ -951,14 +1290,14 @@ pl_profiler_linestats(PG_FUNCTION_ARGS)
 
 	MemoryContextSwitchTo(oldcontext);
 
-	if (linestats_hash != NULL)
+	if (functions_hash != NULL)
 	{
-		hash_seq_init(&hash_seq, linestats_hash);
+		hash_seq_init(&hash_seq, functions_hash);
 		while ((entry = hash_seq_search(&hash_seq)) != NULL)
 		{
 			int		lno;
 
-			for (lno = 0; lno <= entry->line_count; lno++)
+			for (lno = 0; lno < entry->line_count; lno++)
 			{
 				Datum		values[PL_PROFILE_COLS];
 				bool		nulls[PL_PROFILE_COLS];
@@ -988,17 +1327,113 @@ pl_profiler_linestats(PG_FUNCTION_ARGS)
 }
 
 /* -------------------------------------------------------------------
- * pl_profiler_callgraph()
+ * pl_profiler_linestats_shared()
  *
- *	Returns the current content of the call graph hash table
+ *	Returns the content of the shared line stats hash table
  *	as a set of rows.
  * -------------------------------------------------------------------
  */
 Datum
-pl_profiler_callgraph(PG_FUNCTION_ARGS)
+pl_profiler_linestats_shared(PG_FUNCTION_ARGS)
+{
+	ReturnSetInfo		   *rsinfo = (ReturnSetInfo *)fcinfo->resultinfo;
+	TupleDesc				tupdesc;
+	Tuplestorestate		   *tupstore;
+	MemoryContext			per_query_ctx;
+	MemoryContext			oldcontext;
+	HASH_SEQ_STATUS			hash_seq;
+	linestatsEntry		   *entry;
+	profilerSharedState	   *plpss = profiler_shared_state;
+
+	/* check to see if caller supports us returning a tuplestore */
+	if (rsinfo == NULL || !IsA(rsinfo, ReturnSetInfo))
+		ereport(ERROR,
+				(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+				 errmsg("set-valued function called in context "
+						"that cannot accept a set")));
+	if (!(rsinfo->allowedModes & SFRM_Materialize))
+		ereport(ERROR,
+				(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+				 errmsg("materialize mode required, but it is not "
+						"allowed in this context")));
+
+	/* Check that plprofiler was loaded via shared_preload_libraries */
+	if (plpss == NULL)
+		elog(ERROR, "plprofiler was not loaded via shared_preload_libraries");
+
+	/* Build a tuple descriptor for our result type */
+	if (get_call_result_type(fcinfo, NULL, &tupdesc) != TYPEFUNC_COMPOSITE)
+		elog(ERROR, "return type must be a row type");
+
+	per_query_ctx = rsinfo->econtext->ecxt_per_query_memory;
+	oldcontext = MemoryContextSwitchTo(per_query_ctx);
+
+	tupstore = tuplestore_begin_heap(true, false, work_mem);
+	rsinfo->returnMode = SFRM_Materialize;
+	rsinfo->setResult = tupstore;
+	rsinfo->setDesc = tupdesc;
+
+	MemoryContextSwitchTo(oldcontext);
+
+	/* Place a shared lock on the shared memory data. */
+	LWLockAcquire(plpss->lock, LW_SHARED);
+
+	hash_seq_init(&hash_seq, functions_shared);
+	while ((entry = hash_seq_search(&hash_seq)) != NULL)
+	{
+		int		lno;
+
+		if (entry->key.db_oid != MyDatabaseId)
+			continue;
+
+		/* Guard agains concurrent updates of the counters. */
+		SpinLockAcquire(&(entry->mutex));
+
+		for (lno = 0; lno <= entry->line_count; lno++)
+		{
+			Datum		values[PL_PROFILE_COLS];
+			bool		nulls[PL_PROFILE_COLS];
+			int			i = 0;
+
+			/* Include this entry in the result. */
+			MemSet(values, 0, sizeof(values));
+			MemSet(nulls, 0, sizeof(nulls));
+
+			values[i++] = ObjectIdGetDatum(entry->key.fn_oid);
+			values[i++] = Int64GetDatumFast(lno);
+			values[i++] = Int64GetDatumFast(entry->line_info[lno].exec_count);
+			values[i++] = Int64GetDatumFast(entry->line_info[lno].us_total);
+			values[i++] = Int64GetDatumFast(entry->line_info[lno].us_max);
+
+			Assert(i == PL_PROFILE_COLS);
+
+			tuplestore_putvalues(tupstore, tupdesc, values, nulls);
+		}
+
+		/* Done with the counter access. */
+		SpinLockRelease(&(entry->mutex));
+	}
+
+	/* Release the shared lock on the shared memory data. */
+	LWLockRelease(plpss->lock);
+
+	/* clean up and return the tuplestore */
+	tuplestore_donestoring(tupstore);
+
+	return (Datum)0;
+}
+
+/* -------------------------------------------------------------------
+ * pl_profiler_callgraph_local()
+ *
+ *	Returns the content of the local call graph hash table
+ *	as a set of rows.
+ * -------------------------------------------------------------------
+ */
+Datum
+pl_profiler_callgraph_local(PG_FUNCTION_ARGS)
 {
 	ReturnSetInfo	   *rsinfo = (ReturnSetInfo *)fcinfo->resultinfo;
-	bool				filter_zero = PG_GETARG_BOOL(0);
 	TupleDesc			tupdesc;
 	Tuplestorestate	   *tupstore;
 	MemoryContext		per_query_ctx;
@@ -1006,7 +1441,7 @@ pl_profiler_callgraph(PG_FUNCTION_ARGS)
 	HASH_SEQ_STATUS		hash_seq;
 	callGraphEntry	   *entry;
 
-	/* check to see if caller supports us returning a tuplestore */
+	/* Check to see if caller supports us returning a tuplestore */
 	if (rsinfo == NULL || !IsA(rsinfo, ReturnSetInfo))
 		ereport(ERROR,
 				(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
@@ -1044,13 +1479,6 @@ pl_profiler_callgraph(PG_FUNCTION_ARGS)
 			int			i = 0;
 			int			j = 0;
 
-			/*
-			 * Filter out call stacks that have not been seen since
-			 * the last collect_data() call.
-			 */
-			if (filter_zero && entry->callCount == 0)
-				continue;
-
 			MemSet(values, 0, sizeof(values));
 			MemSet(nulls, 0, sizeof(nulls));
 
@@ -1078,14 +1506,115 @@ pl_profiler_callgraph(PG_FUNCTION_ARGS)
 }
 
 /* -------------------------------------------------------------------
- * pl_profiler_func_oids_current()
+ * pl_profiler_callgraph_shared()
  *
- *	Returns an array of all function Oids that we currently have
- *	linestat information for.
+ *	Returns the content of the shared call graph hash table
+ *	as a set of rows.
  * -------------------------------------------------------------------
  */
 Datum
-pl_profiler_func_oids_current(PG_FUNCTION_ARGS)
+pl_profiler_callgraph_shared(PG_FUNCTION_ARGS)
+{
+	ReturnSetInfo		   *rsinfo = (ReturnSetInfo *)fcinfo->resultinfo;
+	TupleDesc				tupdesc;
+	Tuplestorestate		   *tupstore;
+	MemoryContext			per_query_ctx;
+	MemoryContext			oldcontext;
+	HASH_SEQ_STATUS			hash_seq;
+	callGraphEntry		   *entry;
+	profilerSharedState	   *plpss = profiler_shared_state;
+
+	/* Check to see if caller supports us returning a tuplestore */
+	if (rsinfo == NULL || !IsA(rsinfo, ReturnSetInfo))
+		ereport(ERROR,
+				(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+				 errmsg("set-valued function called in context "
+						"that cannot accept a set")));
+	if (!(rsinfo->allowedModes & SFRM_Materialize))
+		ereport(ERROR,
+				(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+				 errmsg("materialize mode required, but it is not "
+						"allowed in this context")));
+
+	/* Check that plprofiler was loaded via shared_preload_libraries */
+	if (plpss == NULL)
+		elog(ERROR, "plprofiler was not loaded via shared_preload_libraries");
+
+	/* Build a tuple descriptor for our result type */
+	if (get_call_result_type(fcinfo, NULL, &tupdesc) != TYPEFUNC_COMPOSITE)
+		elog(ERROR, "return type must be a row type");
+
+	per_query_ctx = rsinfo->econtext->ecxt_per_query_memory;
+	oldcontext = MemoryContextSwitchTo(per_query_ctx);
+
+	tupstore = tuplestore_begin_heap(true, false, work_mem);
+	rsinfo->returnMode = SFRM_Materialize;
+	rsinfo->setResult = tupstore;
+	rsinfo->setDesc = tupdesc;
+
+	MemoryContextSwitchTo(oldcontext);
+
+	/* Place a shared lock on the shared memory data. */
+	LWLockAcquire(plpss->lock, LW_SHARED);
+
+	hash_seq_init(&hash_seq, callgraph_shared);
+	while ((entry = hash_seq_search(&hash_seq)) != NULL)
+	{
+		Datum		values[PL_CALLGRAPH_COLS];
+		bool		nulls[PL_CALLGRAPH_COLS];
+		Datum		funcdefs[PL_MAX_STACK_DEPTH];
+
+		int			i = 0;
+		int			j = 0;
+
+		/* Only entries of the local database are visible. */
+		if (entry->key.db_oid != MyDatabaseId)
+			continue;
+
+		MemSet(values, 0, sizeof(values));
+		MemSet(nulls, 0, sizeof(nulls));
+
+		for (i = 0; i < PL_MAX_STACK_DEPTH && entry->key.stack[i] != InvalidOid; i++)
+			funcdefs[i] = ObjectIdGetDatum(entry->key.stack[i]);
+
+		values[j++] = PointerGetDatum(construct_array(funcdefs, i,
+													  OIDOID, sizeof(Oid),
+													  true, 'i'));
+
+		/* Guard agains concurrent updates of the counters. */
+		SpinLockAcquire(&(entry->mutex));
+
+		values[j++] = Int64GetDatumFast(entry->callCount);
+		values[j++] = Int64GetDatumFast(entry->totalTime);
+		values[j++] = Int64GetDatumFast(entry->childTime);
+		values[j++] = Int64GetDatumFast(entry->selfTime);
+
+		/* Done with the counter access. */
+		SpinLockRelease(&(entry->mutex));
+
+		Assert(j == PL_CALLGRAPH_COLS);
+
+		tuplestore_putvalues(tupstore, tupdesc, values, nulls);
+	}
+
+	/* Release the shared lock on the shared memory data. */
+	LWLockRelease(plpss->lock);
+
+	/* clean up and return the tuplestore */
+	tuplestore_donestoring(tupstore);
+
+	return (Datum)0;
+}
+
+/* -------------------------------------------------------------------
+ * pl_profiler_func_oids_local()
+ *
+ *	Returns an array of all function Oids that we have
+ *	linestat information for in the local hash table.
+ * -------------------------------------------------------------------
+ */
+Datum
+pl_profiler_func_oids_local(PG_FUNCTION_ARGS)
 {
 	int					i = 0;
 	Datum			   *result;
@@ -1094,9 +1623,9 @@ pl_profiler_func_oids_current(PG_FUNCTION_ARGS)
 
 	/* First pass to count the number of Oids, we will return. */
 
-	if (linestats_hash != NULL)
+	if (functions_hash != NULL)
 	{
-		hash_seq_init(&hash_seq, linestats_hash);
+		hash_seq_init(&hash_seq, functions_hash);
 		while ((entry = hash_seq_search(&hash_seq)) != NULL)
 			i++;
 	}
@@ -1111,16 +1640,78 @@ pl_profiler_func_oids_current(PG_FUNCTION_ARGS)
 		result = palloc(sizeof(Datum) * i);
 	}
 	if (result == NULL)
-		elog(ERROR, "out of memory in pl_profiler_func_oids_current()");
+		elog(ERROR, "out of memory in pl_profiler_func_oids_local()");
 
 	/* Second pass to collect the Oids. */
-	if (linestats_hash != NULL)
+	if (functions_hash != NULL)
 	{
 		i = 0;
-		hash_seq_init(&hash_seq, linestats_hash);
+		hash_seq_init(&hash_seq, functions_hash);
 		while ((entry = hash_seq_search(&hash_seq)) != NULL)
 			result[i++] = ObjectIdGetDatum(entry->key.fn_oid);
 	}
+
+	/* Build and return the actual array. */
+	PG_RETURN_ARRAYTYPE_P(PointerGetDatum(construct_array(result, i,
+														  OIDOID, sizeof(Oid),
+														  true, 'i')));
+}
+
+/* -------------------------------------------------------------------
+ * pl_profiler_func_oids_shared()
+ *
+ *	Returns an array of all function Oids that we have
+ *	linestat information for in the shared hash table.
+ * -------------------------------------------------------------------
+ */
+Datum
+pl_profiler_func_oids_shared(PG_FUNCTION_ARGS)
+{
+	int						i = 0;
+	Datum				   *result;
+	HASH_SEQ_STATUS			hash_seq;
+	linestatsEntry		   *entry;
+	profilerSharedState	   *plpss = profiler_shared_state;
+
+	/* Check that plprofiler was loaded via shared_preload_libraries */
+	if (plpss == NULL)
+		elog(ERROR, "plprofiler was not loaded via shared_preload_libraries");
+
+	/* Place a shared lock on the shared memory data. */
+	LWLockAcquire(plpss->lock, LW_SHARED);
+
+	/* First pass to count the number of Oids, we will return. */
+
+	hash_seq_init(&hash_seq, functions_shared);
+	while ((entry = hash_seq_search(&hash_seq)) != NULL)
+	{
+		if (entry->key.db_oid == MyDatabaseId)
+			i++;
+	}
+
+	/* Allocate Oid array for result. */
+	if (i == 0)
+	{
+		result = palloc(sizeof(Datum));
+	}
+	else
+	{
+		result = palloc(sizeof(Datum) * i);
+	}
+	if (result == NULL)
+		elog(ERROR, "out of memory in pl_profiler_func_oids_shared()");
+
+	/* Second pass to collect the Oids. */
+	i = 0;
+	hash_seq_init(&hash_seq, functions_shared);
+	while ((entry = hash_seq_search(&hash_seq)) != NULL)
+	{
+		if (entry->key.db_oid == MyDatabaseId)
+			result[i++] = ObjectIdGetDatum(entry->key.fn_oid);
+	}
+
+	/* Release the shared lock on the shared memory data. */
+	LWLockRelease(plpss->lock);
 
 	/* Build and return the actual array. */
 	PG_RETURN_ARRAYTYPE_P(PointerGetDatum(construct_array(result, i,
@@ -1248,15 +1839,61 @@ pl_profiler_funcs_source(PG_FUNCTION_ARGS)
 }
 
 /* -------------------------------------------------------------------
- * pl_profiler_reset()
+ * pl_profiler_reset_local()
  *
- *	Drop all current data collected in the hash tables.
+ *	Drop all data collected in the local hash tables.
  * -------------------------------------------------------------------
  */
 Datum
-pl_profiler_reset(PG_FUNCTION_ARGS)
+pl_profiler_reset_local(PG_FUNCTION_ARGS)
 {
 	init_hash_tables();
+
+	PG_RETURN_VOID();
+}
+
+/* -------------------------------------------------------------------
+ * pl_profiler_reset_shared()
+ *
+ *	Drop all data collected in the shared hash tables and the
+ *	shared state.
+ * -------------------------------------------------------------------
+ */
+Datum
+pl_profiler_reset_shared(PG_FUNCTION_ARGS)
+{
+	HASH_SEQ_STATUS			hash_seq;
+	callGraphEntry		   *lsent;
+	linestatsEntry		   *cgent;
+	profilerSharedState	   *plpss = profiler_shared_state;
+
+	/* Check that plprofiler was loaded via shared_preload_libraries */
+	if (plpss == NULL)
+		elog(ERROR, "plprofiler was not loaded via shared_preload_libraries");
+
+	LWLockAcquire(plpss->lock, LW_EXCLUSIVE);
+
+	/* Reset the shared state. */
+	plpss->callgraph_overflow = false;
+	plpss->functions_overflow = false;
+	plpss->lines_overflow = false;
+	plpss->lines_used = 0;
+
+	/* Delete all entries from the callgraph hash table. */
+	hash_seq_init(&hash_seq, callgraph_shared);
+	while ((cgent = hash_seq_search(&hash_seq)) != NULL)
+	{
+		hash_search(callgraph_shared, &(cgent->key), HASH_REMOVE, NULL);
+	}
+
+	/* Delete all entries from the functions hash table. */
+	hash_seq_init(&hash_seq, functions_shared);
+	while ((lsent = hash_seq_search(&hash_seq)) != NULL)
+	{
+		hash_search(callgraph_shared, &(lsent->key), HASH_REMOVE, NULL);
+	}
+
+	LWLockRelease(plpss->lock);
 
 	PG_RETURN_VOID();
 }
@@ -1281,88 +1918,67 @@ pl_profiler_enable(PG_FUNCTION_ARGS)
 /* -------------------------------------------------------------------
  * pl_profiler_collect_data()
  *
- *	Save the current content of the hash tables into the configured
- *	permanent tables and reset the counters.
+ *	SQL level callable function to collect profiling data from the
+ *	local tables into the shared hash tables.
  * -------------------------------------------------------------------
  */
 Datum
 pl_profiler_collect_data(PG_FUNCTION_ARGS)
 {
-	HASH_SEQ_STATUS		hash_seq;
-	linestatsEntry	   *lineEnt;
-	callGraphEntry	   *callGraphEnt;
-	char				query[256 + NAMEDATALEN * 2];
-	int32				result = 0;
+	PG_RETURN_INT32(profiler_collect_data());
+}
 
-	if (SPI_connect() != SPI_OK_CONNECT)
-		elog(ERROR, "SPI_connect() failed in pl_profiler_collect_data()");
+/* -------------------------------------------------------------------
+ * pl_profiler_callgraph_overflow()
+ *
+ *	Return the flag callgraph_overflow from the shared state.
+ * -------------------------------------------------------------------
+ */
+Datum
+pl_profiler_callgraph_overflow(PG_FUNCTION_ARGS)
+{
+	profilerSharedState	   *plpss = profiler_shared_state;
 
-	/*
-	 * If not done yet, figure out which namespace the plprofiler
-	 * extension is installed in.
-	 */
-	if (profiler_namespace == NULL)
-	{
-		MemoryContext	oldcxt;
+	/* Check that plprofiler was loaded via shared_preload_libraries */
+	if (plpss == NULL)
+		elog(ERROR, "plprofiler was not loaded via shared_preload_libraries");
 
-		/* Figure out our extension installation schema. */
-		oldcxt = MemoryContextSwitchTo(TopMemoryContext);
-		profiler_namespace = get_namespace_name(get_extension_schema(
-							 get_extension_oid("plprofiler", false)));
-		MemoryContextSwitchTo(oldcxt);
-	}
+	PG_RETURN_BOOL(plpss->callgraph_overflow);
+}
 
-	/*
-	 * If we have the hash table for line stats and the table name
-	 * to save them into is configured, do that and reset all counters
-	 * (but don't just zap the hash table as rebuilding that is rather
-	 * costly).
-	 */
-	if (linestats_hash != NULL && profiler_save_line_table != NULL)
-	{
-		snprintf(query, sizeof(query),
-				 "INSERT INTO \"%s\".\"%s\" "
-				 "    SELECT func_oid, line_number, exec_count, total_time, "
-				 "			 longest_time "
-				 "    FROM \"%s\".pl_profiler_linestats(true)",
-				 profiler_namespace, profiler_save_line_table,
-				 profiler_namespace);
-		SPI_exec(query, 0);
+/* -------------------------------------------------------------------
+ * pl_profiler_functions_overflow()
+ *
+ *	Return the flag functions_overflow from the shared state.
+ * -------------------------------------------------------------------
+ */
+Datum
+pl_profiler_functions_overflow(PG_FUNCTION_ARGS)
+{
+	profilerSharedState	   *plpss = profiler_shared_state;
 
-		hash_seq_init(&hash_seq, linestats_hash);
-		while ((lineEnt = hash_seq_search(&hash_seq)) != NULL)
-			MemSet(&(lineEnt->line_info), 0,
-				   sizeof(linestatsLineInfo) * (lineEnt->line_count + 1));
+	/* Check that plprofiler was loaded via shared_preload_libraries */
+	if (plpss == NULL)
+		elog(ERROR, "plprofiler was not loaded via shared_preload_libraries");
 
-		result += SPI_processed;
-	}
+	PG_RETURN_BOOL(plpss->functions_overflow);
+}
 
-	/* Same with call graph stats. */
-	if (callgraph_hash != NULL && profiler_save_callgraph_table != NULL)
-	{
-		snprintf(query, sizeof(query),
-				 "INSERT INTO \"%s\".\"%s\" "
-				 "    SELECT stack, call_count, us_total, "
-				 "           us_children, us_self "
-				 "    FROM \"%s\".pl_profiler_callgraph(true)",
-				 profiler_namespace, profiler_save_callgraph_table,
-				 profiler_namespace);
-		SPI_exec(query, 0);
+/* -------------------------------------------------------------------
+ * pl_profiler_lines_overflow()
+ *
+ *	Return the flag lines_overflow from the shared state.
+ * -------------------------------------------------------------------
+ */
+Datum
+pl_profiler_lines_overflow(PG_FUNCTION_ARGS)
+{
+	profilerSharedState	   *plpss = profiler_shared_state;
 
-		hash_seq_init(&hash_seq, callgraph_hash);
-		while ((callGraphEnt = hash_seq_search(&hash_seq)) != NULL)
-		{
-			callGraphEnt->callCount = 0;
-			callGraphEnt->totalTime = 0;
-			callGraphEnt->childTime = 0;
-			callGraphEnt->selfTime = 0;
-		}
+	/* Check that plprofiler was loaded via shared_preload_libraries */
+	if (plpss == NULL)
+		elog(ERROR, "plprofiler was not loaded via shared_preload_libraries");
 
-		result += SPI_processed;
-	}
-
-	SPI_finish();
-
-	PG_RETURN_INT32(result);
+	PG_RETURN_BOOL(plpss->lines_overflow);
 }
 

@@ -31,8 +31,8 @@ def main():
                 help_edit()
             elif sys.argv[2] == 'delete':
                 help_delete()
-            elif sys.argv[2] == 'reset-data':
-                help_reset_data()
+            elif sys.argv[2] == 'reset':
+                help_reset()
             elif sys.argv[2] == 'report':
                 help_report()
             elif sys.argv[2] == 'export':
@@ -59,8 +59,8 @@ def main():
     if sys.argv[1] == 'delete':
         return delete_command(sys.argv[2:])
 
-    if sys.argv[1] == 'reset-data':
-        return reset_data_command(sys.argv[2:])
+    if sys.argv[1] == 'reset':
+        return reset_command(sys.argv[2:])
 
     if sys.argv[1] == 'report':
         return report_command(sys.argv[2:])
@@ -172,7 +172,7 @@ def save_command(argv):
     try:
         plp = plprofiler()
         plp.connect(connoptions)
-        plp.save_dataset_from_data(opt_name, config, opt_force)
+        plp.save_dataset_from_shared(opt_name, config, opt_force)
 
     except Exception as err:
         sys.stderr.write(str(err) + '\n')
@@ -368,7 +368,7 @@ def delete_command(argv):
         sys.stderr.write(str(err) + '\n')
         return 1
 
-def reset_data_command(argv):
+def reset_command(argv):
     connoptions = {}
 
     # ----
@@ -398,17 +398,17 @@ def reset_data_command(argv):
         elif opt in ['-U', '--user']:
             connoptions['user'] = val
         elif opt in ['--help']:
-            help_reset_data()
+            help_reset()
             return 0
 
     # ----
-    # Delete the collected data from the pl_profiler_linestats_data
-    # and pl_profiler_callgraph_data tables.
+    # Delete the collected data from the pl_profiler_linestats_shared
+    # and pl_profiler_callgraph_shared hashtables.
     # ----
     try:
         plp = plprofiler()
         plp.connect(connoptions)
-        plp.reset_data()
+        plp.reset_shared()
     except Exception as err:
         sys.stderr.write(str(err) + '\n')
         return 1
@@ -420,7 +420,7 @@ def report_command(argv):
     opt_desc = None
     opt_top = 10
     opt_output = None
-    opt_from_data = False
+    opt_from_shared = False
     need_edit = False
 
     try:
@@ -430,7 +430,7 @@ def report_command(argv):
                 'dbname=', 'host=', 'port=', 'user=', 'help',
                 # report command specific options
                 'name=', 'title=', 'desc=', 'description=',
-                'output=', 'top=', 'from-data', ])
+                'output=', 'top=', 'from-shared', ])
     except Exception as err:
         sys.stderr.write(str(err) + '\n')
         return 2
@@ -461,13 +461,13 @@ def report_command(argv):
             opt_output = val
         elif opt in ('--top', ):
             opt_top = int(val)
-        elif opt in ('--from-data', ):
-            opt_from_data = True
+        elif opt in ('--from-shared', ):
+            opt_from_shared = True
 
-    if opt_name is None and not opt_from_data:
-        sys.write.stderr("option --name or --from-data must be given\n")
+    if opt_name is None and not opt_from_shared:
+        sys.write.stderr("option --name or --from-shared must be given\n")
         return 2
-    if opt_from_data and (opt_name is None or opt_title is None or opt_desc is None):
+    if opt_from_shared and (opt_name is None or opt_title is None or opt_desc is None):
         need_edit = True
 
     if opt_output is None:
@@ -486,8 +486,8 @@ def report_command(argv):
     # Get the report data either from the collected *_data tables
     # or a saved dataset.
     # ----
-    if opt_from_data:
-        report_data = plp.get_report_data(opt_name, opt_top, args)
+    if opt_from_shared:
+        report_data = plp.get_shared_report_data(opt_name, opt_top, args)
     else:
         report_data = plp.get_saved_report_data(opt_name, opt_top, args)
 
@@ -525,7 +525,7 @@ def export_command(argv):
     opt_desc = None
     opt_top = pow(2, 31)
     opt_output = None
-    opt_from_data = False
+    opt_from_shared = False
     opt_edit = False
 
     try:
@@ -535,7 +535,7 @@ def export_command(argv):
                 'dbname=', 'host=', 'port=', 'user=', 'help',
                 # report command specific options
                 'all', 'name=', 'title=', 'desc=', 'description=',
-                'edit', 'output=', 'from-data', ])
+                'edit', 'output=', 'from-shared', ])
     except Exception as err:
         sys.stderr.write(str(err) + '\n')
         return 2
@@ -568,11 +568,11 @@ def export_command(argv):
             opt_desc = val
         elif opt in ('-o', '--output', ):
             opt_output = val
-        elif opt in ('--from-data', ):
-            opt_from_data = True
+        elif opt in ('--from-shared', ):
+            opt_from_shared = True
 
-    if not opt_all and opt_name is None and not opt_from_data:
-        sys.write.stderr("option --all, --name or --from-data must be given\n")
+    if not opt_all and opt_name is None and not opt_from_shared:
+        sys.write.stderr("option --all, --name or --from-shared must be given\n")
         return 2
 
     if opt_output is None:
@@ -590,7 +590,7 @@ def export_command(argv):
     if opt_all:
         export_names = [row[0] for row in plp.get_dataset_list()]
     else:
-        if opt_from_data:
+        if opt_from_shared:
             export_names = ['collected_data']
         else:
             export_names = [opt_name]
@@ -604,8 +604,8 @@ def export_command(argv):
         # Get the report data either from the collected *_data tables
         # or a saved dataset.
         # ----
-        if opt_from_data:
-            report_data = plp.get_report_data(name, opt_top, args)
+        if opt_from_shared:
+            report_data = plp.get_shared_report_data(name, opt_top, args)
         else:
             report_data = plp.get_saved_report_data(name, opt_top, args)
 
@@ -809,7 +809,7 @@ def run_command(argv):
         return 1
 
     plp.enable()
-    plp.reset_current()
+    plp.reset_local()
     plp.execute_sql(opt_query)
 
     # ----
@@ -838,14 +838,14 @@ def run_command(argv):
 
     if opt_save:
         try:
-            plp.save_dataset_from_current(opt_name, config, opt_force)
+            plp.save_dataset_from_local(opt_name, config, opt_force)
         except Exception as err:
             sys.stderr.write(str(err) + "\n")
             return 1
 
     if opt_output is not None:
         with open(opt_output, 'w') as output_fd:
-            report_data = plp.get_current_report_data(opt_name, opt_top, args)
+            report_data = plp.get_local_report_data(opt_name, opt_top, args)
             report_data['config'] = config
             plp.report(report_data, output_fd)
             output_fd.close()
@@ -899,7 +899,6 @@ def monitor_command(argv):
         sys.stderr.write(str(err) + '\n')
         return 1
 
-    plp.reset_data()
     try:
         plp.enable_monitor(opt_pid, opt_interval)
     except Exception as err:
@@ -1001,7 +1000,7 @@ TERMS:
                     session ends or the hash tables are explicitly reset.
 
     collected-data  The plprofiler extension can copy the in-memory-data
-                    into global tables, to make the statistics available
+                    into shared hashtables, to make the statistics available
                     to other sessions. See the "monitor" command for
                     details. This data relies on the local database's
                     system catalog to resolve Oid values into object
@@ -1025,7 +1024,7 @@ COMMANDS:
                     and creates a saved-dataset and/or an HTML report from
                     the resulting collected-data.
 
-    reset-data      Deletes the collected-data.
+    reset           Deletes the collected-data from shared hash tables.
 
     save            Saves the current collected-data as a saved-dataset.
 
@@ -1091,7 +1090,7 @@ usage: plprofiler monitor [OPTIONS]
     at the specified interval.
 
     The resulting collected-data can be used with the "save" and "report"
-    commands and cleared with "reset-data".
+    commands and cleared with "reset".
 
 NOTES:
 
@@ -1137,11 +1136,12 @@ OPTIONS:
 
 """
 
-def help_reset_data():
+def help_reset():
     print """
-usage: plprofiler reset-data
+usage: plprofiler reset
 
-    Deletes all data from the collected-data tables.
+    Deletes all data from the shared hashtables. This affects all databases
+    in the cluster.
 
     This does NOT destroy any of the saved-datasets.
 
@@ -1208,16 +1208,16 @@ usage: plprofiler report [OPTIONS]
 
 OPTIONS:
 
-    --from-data     Use the collected-data rather than a saved-dataset.
+    --from-shared   Use the collected-data rather than a saved-dataset.
 
     --name=NAME     The name of the saved-dataset to load or the NAME
-                    to use with --from-data.
+                    to use with --from-shared.
 
     --title=TITLE   Override the TITLE found in the saved-dataset's
-                    metadata, or the TITLE to use with --from-data.
+                    metadata, or the TITLE to use with --from-shared.
 
     --desc=DESC     Override the DESC found in the saved-dataset's
-                    metadata, or the DESC to use with --from-data.
+                    metadata, or the DESC to use with --from-shared.
 
     --output=FILE   Destination for the HTML report (default=stdout).
 
@@ -1249,7 +1249,7 @@ OPTIONS:
 
     --all           Export all saved-datasets.
 
-    --from-data     Export the collected-data instead of a saved-dataset.
+    --from-shared   Export the collected-data instead of a saved-dataset.
 
     --name=NAME     The NAME of the dataset to save.
 
