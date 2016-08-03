@@ -3,7 +3,7 @@ OBJS = plprofiler.o
 
 EXTENSION = plprofiler
 DATA =	plprofiler--1.0--2.0.sql	\
-		plprofiler--2.0.sql \
+		plprofiler--2.0--3.0.sql \
 		plprofiler--3.0.sql
 
 ifdef USE_PGXS
