@@ -12,8 +12,20 @@ ALTER EXTENSION plprofiler DROP FUNCTION pl_profiler_reset();
 ALTER EXTENSION plprofiler DROP FUNCTION pl_profiler_enable(bool);
 ALTER EXTENSION plprofiler DROP FUNCTION pl_profiler_collect_data();
 
+DROP FUNCTION pl_profiler_linestats(bool);
+DROP FUNCTION pl_profiler_callgraph(bool);
+DROP FUNCTION pl_profiler_func_oids_current();
+DROP FUNCTION pl_profiler_funcs_source(oid[]);
+DROP FUNCTION pl_profiler_get_stack(oid[]);
+DROP FUNCTION pl_profiler_reset();
+DROP FUNCTION pl_profiler_enable(bool);
+DROP FUNCTION pl_profiler_collect_data();
+
 ALTER EXTENSION plprofiler DROP TABLE pl_profiler_linestats_data;
 ALTER EXTENSION plprofiler DROP TABLE pl_profiler_callgraph_data;
+
+DROP TABLE pl_profiler_linestats_data;
+DROP TABLE pl_profiler_callgraph_data;
 
 -- Register functions.
 
