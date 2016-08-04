@@ -352,7 +352,8 @@ class plprofiler:
                 'tabstop': '8',
                 'svg_width': '1200',
                 'table_width': '80%',
-                'desc': '<h1>PL Profiler Report for %s</h1>' %(opt_name, ),
+                'desc': '<h1>PL Profiler Report for %s</h1>\n' %(opt_name, ) +
+                        '<p>\n<!-- description here -->\n</p>',
             }
 
         # ----
@@ -521,7 +522,8 @@ class plprofiler:
                 'tabstop': '8',
                 'svg_width': '1200',
                 'table_width': '80%',
-                'desc': '<h1>PL Profiler Report for %s</h1>' %(opt_name, ),
+                'desc': '<h1>PL Profiler Report for %s</h1>\n' %(opt_name, ) +
+                        '<p>\n<!-- description here -->\n</p>',
             }
 
         # ----

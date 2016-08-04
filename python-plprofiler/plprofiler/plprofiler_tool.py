@@ -468,6 +468,8 @@ def report_command(argv):
     if opt_name is None and not opt_from_shared:
         sys.write.stderr("option --name or --from-shared must be given\n")
         return 2
+    if opt_name is None:
+        opt_name = 'current_data'
     if opt_from_shared and (opt_name is None or opt_title is None or opt_desc is None):
         need_edit = True
 
