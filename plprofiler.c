@@ -41,7 +41,7 @@ static int line_match_fn(const void *key1, const void *key2, Size keysize);
 static uint32 callgraph_hash_fn(const void *key, Size keysize);
 static int callgraph_match_fn(const void *key1, const void *key2, Size keysize);
 static void callgraph_push(Oid func_oid);
-static void callgraph_pop_one(Oid func_oid);
+static void callgraph_pop_one(void);
 static void callgraph_pop(Oid func_oid);
 static void callgraph_check(Oid func_oid);
 static void callgraph_collect(uint64 us_elapsed, uint64 us_self,
@@ -407,7 +407,8 @@ profiler_func_beg(PLpgSQL_execstate *estate, PLpgSQL_function *func)
 		 * is not properly unwound down to zero depth. Unwind it here.
 		 */
 		elog(DEBUG1, "plprofiler: stale call stack reset");
-		callgraph_pop_one(InvalidOid);
+		while (graph_stack_pt > 0)
+			callgraph_pop_one();
 	}
 	graph_current_xid = current_xid;
 
@@ -450,8 +451,11 @@ profiler_func_end(PLpgSQL_execstate *estate, PLpgSQL_function *func)
 	entry = (linestatsEntry *)hash_search(functions_hash, &key,
 										  HASH_FIND, NULL);
 	if (!entry)
-		elog(ERROR, "plprofiler: local linestats entry for fn_oid %u "
+	{
+		elog(DEBUG1, "plprofiler: local linestats entry for fn_oid %u "
 					"not found", func->fn_oid);
+		return;
+	}
 
 	/* Loop through each line of source code and update the stats */
 	for(i = 1; i < profiler_info->line_count; i++)
@@ -819,7 +823,7 @@ callgraph_push(Oid func_oid)
 }
 
 static void
-callgraph_pop_one(Oid func_oid)
+callgraph_pop_one(void)
 {
 	instr_time			now;
 	uint64				us_elapsed;
@@ -849,36 +853,40 @@ callgraph_pop_one(Oid func_oid)
 	if (graph_stack_pt > 0)
 		graph_stack_child_time[graph_stack_pt - 1] += us_elapsed;
 
-	/* Zap the oid from the call stack. */
-	graph_stack.stack[graph_stack_pt] = InvalidOid;
-
 	/*
 	 * We also collect per function global counts in the pseudo line number
 	 * zero. The line stats are cumulative (for example a FOR ... LOOP
 	 * statement has the entire execution time of all statements in its
 	 * block), so this can't be derived from the actual per line data.
 	 */
-	key.fn_oid = func_oid;
+	key.fn_oid = graph_stack.stack[graph_stack_pt];
 	key.db_oid = MyDatabaseId;
 
 	entry = (linestatsEntry *)hash_search(functions_hash, &key, HASH_FIND, NULL);
 
-	if (!entry)
-		elog(ERROR, "plprofiler: local linestats entry for fn_oid %u "
-					"not found", func_oid);
+	if (entry)
+	{
+		entry->line_info[0].exec_count += 1;
+		entry->line_info[0].us_total += us_elapsed;
 
-	entry->line_info[0].exec_count += 1;
-	entry->line_info[0].us_total += us_elapsed;
+		if (us_elapsed > entry->line_info[0].us_max)
+			entry->line_info[0].us_max = us_elapsed;
+	}
+	else
+	{
+		elog(DEBUG1, "plprofiler: local linestats entry for fn_oid %u "
+					"not found", graph_stack.stack[graph_stack_pt]);
+	}
 
-	if (us_elapsed > entry->line_info[0].us_max)
-		entry->line_info[0].us_max = us_elapsed;
+	/* Zap the oid from the call stack. */
+	graph_stack.stack[graph_stack_pt] = InvalidOid;
 }
 
 static void
 callgraph_pop(Oid func_oid)
 {
 	callgraph_check(func_oid);
-	callgraph_pop_one(func_oid);
+	callgraph_pop_one();
 }
 
 static void
@@ -896,7 +904,7 @@ callgraph_check(Oid func_oid)
 	{
 		elog(DEBUG1, "plprofiler: unwinding excess call graph stack entry for %u in %u",
 			 graph_stack.stack[graph_stack_pt - 1], func_oid);
-		callgraph_pop_one(func_oid);
+		callgraph_pop_one();
 	}
 }
 
