@@ -4,6 +4,7 @@ import ConfigParser
 import getopt
 import json
 import os
+import StringIO
 import subprocess
 import sys
 import tempfile
@@ -924,22 +925,44 @@ def edit_config_info(config):
     EDITOR = os.environ.get('EDITOR', default_editor)
     opts = ['title', 'tabstop', 'svg_width', 'table_width', 'desc', ]
 
+    # ----
+    # Create a ConfigParser that contains relevant sections of the config.
+    # ----
     name = config['name']
     tmp_config = ConfigParser.RawConfigParser()
     tmp_config.add_section(name)
     for opt in opts:
         tmp_config.set(name, opt, str(config[opt]))
 
-    with tempfile.NamedTemporaryFile(suffix=".tmp.conf") as tf:
-        tmp_config.write(tf)
-        tf.flush()
-        subprocess.call([EDITOR, tf.name])
+    # ----
+    # We need the temp file to edit to have the correct, OS specific
+    # line endings. So we create a StringIO buffer first to get the
+    # file content from the ConfigParser, then change '\n' into 
+    # os.linesep when creating the temp file.
+    # ----
+    buf = StringIO.StringIO()
+    tmp_config.write(buf)
+    tf = tempfile.NamedTemporaryFile(suffix=".tmp.conf", delete = False)
+    tf_name = tf.name
+    tf.write(buf.getvalue().replace('\n', os.linesep))
+    tf.close()
 
-        for s in tmp_config.sections():
-            tmp_config.remove_section(s)
+    # ----
+    # Call the editor.
+    # ----
+    subprocess.call([EDITOR, tf_name])
 
-        tf.seek(0)
-        tmp_config.readfp(tf)
+    # ----
+    # Remove all sections from the ConfigParser object, read back
+    # the temp file and extract the one expected section.
+    # ----
+    for s in tmp_config.sections():
+        tmp_config.remove_section(s)
+
+    tf = open(tf_name, 'r')
+    tmp_config.readfp(tf)
+    tf.close()
+    os.remove(tf_name)
 
     if len(tmp_config.sections()) != 1:
         raise Exception("config must have exactly one section")
