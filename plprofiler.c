@@ -217,7 +217,11 @@ _PG_init(void)
 
 		/* Request the additionl shared memory and LWLock needed. */
 		RequestAddinShmemSpace(profiler_shmem_size());
+		#if PG_VERSION_NUM >= 90600
+		RequestNamedLWLockTranche("plprofiler", 1);
+		#else
 		RequestAddinLWLocks(1);
+		#endif
 	}
 }
 
@@ -670,7 +674,12 @@ profiler_shmem_startup(void)
 	{
 		memset(plpss, 0, offsetof(profilerSharedState, line_info) +
 						 sizeof(linestatsLineInfo) * profiler_max_lines);
+
+		#if PG_VERSION_NUM >= 90600
+		plpss->lock = &(GetNamedLWLockTranche("plprofiler"))->lock;
+		#else
 		plpss->lock = LWLockAssign();
+		#endif
 	}
 
 	/* (Re)Initialize local hash tables. */
