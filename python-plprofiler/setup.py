@@ -17,16 +17,4 @@ setup(
             'plprofiler = plprofiler:main',
         ]
     },
-    package_data = {
-        'plprofiler': [
-                'lib/FlameGraph/README',
-                'lib/FlameGraph/*.pl',
-                'lib/FlameGraph/*.txt',
-                'lib/FlameGraph/*.svg',
-                'lib/FlameGraph/*.awk',
-                'lib/FlameGraph/demos/*',
-                'lib/FlameGraph/dev/*',
-                'lib/FlameGraph/docs/*',
-            ],
-    }
 )
