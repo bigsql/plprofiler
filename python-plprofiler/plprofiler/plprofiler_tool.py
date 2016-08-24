@@ -466,7 +466,7 @@ def report_command(argv):
             opt_from_shared = True
 
     if opt_name is None and not opt_from_shared:
-        sys.write.stderr("option --name or --from-shared must be given\n")
+        sys.stderr.write("option --name or --from-shared must be given\n")
         return 2
     if opt_name is None:
         opt_name = 'current_data'
@@ -575,7 +575,7 @@ def export_command(argv):
             opt_from_shared = True
 
     if not opt_all and opt_name is None and not opt_from_shared:
-        sys.write.stderr("option --all, --name or --from-shared must be given\n")
+        sys.stderr.write("option --all, --name or --from-shared must be given\n")
         return 2
 
     if opt_output is None:
@@ -683,7 +683,7 @@ def import_command(argv):
             opt_force = True
 
     if opt_file is None:
-        sys.write.stderr("option --file must be given\n")
+        sys.stderr.write("option --file must be given\n")
         return 2
 
     try:
