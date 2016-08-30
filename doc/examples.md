@@ -17,7 +17,9 @@ All examples in this documentation are based on a modified pgbench database. The
 * The table pgbench_accounts is modified.
     * The filler column is expanded and filled with 500 characters of data.
     * A new column, `category interger` is added in front of the aid and made part of the primary key.
-	
+
+NOTE: The command syntax for pgbench custom profiles was changed in PostgreSQL 9.6. There are 9.6 specific profiles in the examples directory as well.
+
 The modifications to the pgbench_accounts table are based on a real world case, encountered in a customer database. This pgbench example case of course is greatly simplified. In the real world case the access to the table in question was in a nested function, 8 call levels deep, the table had several indexes to choose from and the schema contained a total of >500 PL/pgSQL functions with >100,000 lines of PL code. In other words the author was looking for a needle in what once was a haystack, but had been eaten by an elephant.
 
 Despite the simplification, the problem produced by these modifications simulates the original case surprisingly well. The TPC-B transaction accesses the pgbench_accounts table based on the aid column alone, so that is the only key part, available in the WHERE clause. However, since the table rows are now >500 bytes wide and the index is rather small, compared to the heap, the PostgreSQL query optimizer will still choose an index scan. This is the right choice, based on the available options, because a sequential scan would be worse.
