@@ -45,19 +45,19 @@ TERMS:
     The following terms are used in the text below and the help output of
     individual commands:
 
-    in-memory-data  The plprofiler extension collects run-time data in
-                    per-backend hashtables (in-memory). This data is only
-                    accessible in the current session and is lost when the
-                    session ends or the hash tables are explicitly reset.
+    local-data      By default the plprofiler extension collects run-time
+                    data in per-backend hashtables (in-memory). This data is
+                    only accessible in the current session and is lost when
+                    the session ends or the hash tables are explicitly reset.
 
-    collected-data  The plprofiler extension can copy the in-memory-data
-                    into global tables, to make the statistics available
+    shared-data     The plprofiler extension can copy the local-data
+                    into shared hashtables, to make the statistics available
                     to other sessions. See the "monitor" command for
-                    details. This data relies on the local database's
+                    details. This data still relies on the local database's
                     system catalog to resolve Oid values into object
                     definitions.
 
-    saved-dataset   The in-memory-data as well as the collected-data can
+    saved-dataset   The local-data as well as the shared-data can
                     be turned into a named, saved dataset. These sets
                     can be exported and imported onto other machines.
                     The saved datasets are independent of the system
@@ -69,15 +69,15 @@ COMMANDS:
 
     run             Runs one or more SQL statements with the plprofiler
                     extension enabled and creates a saved-dataset and/or
-                    an HTML report from the in-memory-data.
+                    an HTML report from the local-data.
 
     monitor         Monitors a running application for a requested time
                     and creates a saved-dataset and/or an HTML report from
-                    the resulting collected-data.
+                    the resulting shared-data.
 
-    reset-data      Deletes the collected-data.
+    reset           Deletes the data from shared hash tables.
 
-    save            Saves the current collected-data as a saved-dataset.
+    save            Saves the current shared-data as a saved-dataset.
 
     list            Lists the available saved-datasets.
 
@@ -85,7 +85,7 @@ COMMANDS:
                     is used in the generation of the HTML reports.
 
     report          Generates an HTML report from either a saved-dataset
-                    or the collected-data.
+                    or the shared-data.
 
     delete          Deletes a saved-dataset.
 
@@ -102,7 +102,7 @@ Command run
 usage: plprofiler run [OPTIONS]
 
     Runs one or more SQL commands (hopefully invoking one or more PL/pgSQL
-    functions and/or triggers), then turns the in-memory-data into an HTML
+    functions and/or triggers), then turns the local-data into an HTML
     report and/or a saved-dataset.
 
 OPTIONS:
@@ -127,6 +127,8 @@ OPTIONS:
 
     --top=N         Include up to N function detail descriptions in the
                     report (default=10).
+
+
 ```
 
 Command monitor
@@ -135,15 +137,16 @@ Command monitor
 ```
 usage: plprofiler monitor [OPTIONS]
 
-    Turns profile data capturing and periodic saving on of either all
+    Turns profile data capturing and periodic saving on for either all
     database backends, or a single one (specified by PID), waits for a
     specified amount of time, then turns it back off. If during that
     time the application (or specific backend) is executing queries, that
-    invoke PL/pgSQL functions, profile statistics will be saved
-    at the specified interval.
+    invoke PL/pgSQL functions, profile statistics will be collected into
+    shared-data at the specified interval as well as every transaction
+    end (commit or rollback).
 
-    The resulting collected-data can be used with the "save" and "report"
-    commands and cleared with "reset-data".
+    The resulting saved-data can be used with the "save" and "report"
+    commands and cleared with "reset".
 
 NOTES:
 
@@ -153,15 +156,6 @@ NOTES:
     statement execution request. They will not start/stop collecting
     data while they are in the middle of a long-running query.
 
-    Unless the pl_profiler_*_data tables have been configured as
-    foreign data wrappers, pointing back to the monitored database, any
-    rollback operations may lead to partial loss of profiling statistics.
-
-    The periodic saving is only performed when the save-interval has
-    elapsed AND the plprofiler plugin callback at function exit is
-    called by the PL/pgSQL executor. That means that the last "interval"
-    seconds of statistics are usually not copied into the collected-data.
-
 REQUIREMENTS:
 
     This command uses PostgreSQL features, that are only available in
@@ -170,42 +164,40 @@ REQUIREMENTS:
     The plprofiler extension must be loaded via the configuration option
     "shared_preload_libraries" in the postgresql.conf file.
 
-    The application user(s) must have INSERT permission on the plprofiler
-    extension's tables
-
-        pl_profiler_linestats_data and
-        pl_profiler_callgraph_data
-
 OPTIONS:
 
     --pid=PID       The PID of the backend, to monitor. If not given, the
                     entire PostgreSQL instance will be suspect to monitoring.
 
     --interval=SEC  Interval in seconds at which the monitored backend(s)
-                    will copy the in-memory-data to collected-data and then
-                    reset their in-memory-data.
+                    will copy the local-data to shared-data and then
+                    reset their local-data.
 
     --duration=SEC  Duration of the monitoring run in seconds.
-```
 
-Command reset-data
-------------------
 
 ```
-usage: plprofiler reset-data
 
-    Deletes all data from the collected-data tables.
+Command reset
+-------------
+
+```
+usage: plprofiler reset
+
+    Deletes all data from the shared hashtables. This affects all databases
+    in the cluster.
 
     This does NOT destroy any of the saved-datasets.
-```
 
+
+```
 Command save
 ------------
 
 ```
 usage: plprofiler save [OPTIONS]
 
-    The save command is used to create a saved-dataset from collected-data.
+    The save command is used to create a saved-dataset from shared-data.
     Saved datasets are independent from the system catalog, since all their
     Oid based information has been resolved into textual object descriptions.
     Their reports can be recreated later or even on another system (after
@@ -261,20 +253,20 @@ Command report
 ```
 usage: plprofiler report [OPTIONS]
 
-    Create an HTML report from either collected-data or a saved-dataset.
+    Create an HTML report from either shared-data or a saved-dataset.
 
 OPTIONS:
 
-    --from-data     Use the collected-data rather than a saved-dataset.
+    --from-shared   Use the shared-data rather than a saved-dataset.
 
     --name=NAME     The name of the saved-dataset to load or the NAME
-                    to use with --from-data.
+                    to use with --from-shared.
 
     --title=TITLE   Override the TITLE found in the saved-dataset's
-                    metadata, or the TITLE to use with --from-data.
+                    metadata, or the TITLE to use with --from-shared.
 
     --desc=DESC     Override the DESC found in the saved-dataset's
-                    metadata, or the DESC to use with --from-data.
+                    metadata, or the DESC to use with --from-shared.
 
     --output=FILE   Destination for the HTML report (default=stdout).
 
@@ -301,14 +293,14 @@ Command export
 ```
 usage: plprofiler export [OPTIONS]
 
-    Export the collected-data or one or more saved-datasets as a JSON
+    Export the shared-data or one or more saved-datasets as a JSON
     document.
 
 OPTIONS:
 
     --all           Export all saved-datasets.
 
-    --from-data     Export the collected-data instead of a saved-dataset.
+    --from-shared   Export the shared-data instead of a saved-dataset.
 
     --name=NAME     The NAME of the dataset to save.
 
