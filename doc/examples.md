@@ -77,7 +77,7 @@ In the examples below it is assumed that the environment variables `PGHOST`, `PG
 Executing SQL using the plprofiler utility
 ------------------------------------------
 
-After having installed the **plprofiler** extension in the test database, the easiest way to generate a profile of PL/pgSQL functions is to run them using the plprofiler utility and let it create an HTML report directly from the in-memory-data, collected in the backend.
+After having installed the **plprofiler** extension in the test database, the easiest way to generate a profile of PL/pgSQL functions is to run them using the plprofiler utility and let it create an HTML report directly from the local-data, collected in the backend.
 
 `plprofiler run --command "SELECT tpcb(1, 2, 3, -42)" --output tpcb-test1.html`
 
@@ -134,34 +134,28 @@ SELECT pl_profiler_collect_data();
 SELECT pl_profiler_enable(false);
 ```
 
-The **plprofiler** extension creates several global tables in the schema, it is installed in. The two important ones (for now) are `pl_profiler_linestats_data` and `pl_profiler_callgraph_data`. In order to use this profiling method you need to be able to GRANT the application user(s) INSERT permission to these two tables. Since they are owned by default by a database superuser, you must be one too to do that.
-
-The function `pl_profiler_enable(true)` will cause the **plprofiler** extension to be loaded and start accumulating profiling data in the in-memory-data hash tables. The function `pl_profiler_collect_data()` copies that in-memory-data over to the global tables and resets the in-memory-data counters to zero.
+The function `pl_profiler_enable(true)` will cause the **plprofiler** extension to be loaded and start accumulating profiling data in the local-data hash tables. The function `pl_profiler_collect_data()` copies that local-data over to the shared hash tables and resets the local-data counters to zero.
 
 With this changed application code, we can run
 
 ```
-plprofiler reset-data
+plprofiler reset
 pgbench -n -c24 -j24 -T300 -fpgbench_pl.collect.profile
 ```
 
-The `reset-data` command truncates the two global tables. After pgbench has finished, we use the collected-data (the data, that has been copied by the `pl_profiler_collect_data()` function into the `pl_profiler_linestats_data` and `pl_profiler_callgraph_data` tables) to generate a report.
+The `reset` command deletes all data from the shared hash tables. After pgbench has finished, we use the shared-data (the data, that has been copied by the `pl_profiler_collect_data()` function into the shared hash tables to generate a report.
 
-`plprofiler report --from-data --name "tpcb-using-collect" --output "tpcb-using-collect.html"`
+`plprofiler report --from-shared --name "tpcb-using-collect" --output "tpcb-using-collect.html"`
 
 [ ![tpcb-using-collect.hmtl](images/tpcb-using-collect.png) ](http://wi3ck.info/plprofiler/doc/tpcb-using-collect.html)
 [`doc/tpcb-using-collect.html`](http://wi3ck.info/plprofiler/doc/tpcb-using-collect.html)
 
 There seems to be only a subtle change in the profile. The functions for updating the pgbench_branches and pgbench_tellers tables, which are almost invisible in the first profile, now used 5.81% and 2.60% of the time. That may not look like much, but with the access to pgbench_accounts being as screwed up as it is, this is in fact huge. The difference was caused by concurrency (24 clients).
 
-The last pgbench run only showed a drop of the overall performance from 136 TPS to 132 TPS. But generating the report took considerably longer than before. This is because even at this bad performance and with this tiny amount of PL/pgSQL code involved, the **plprofiler** generated almost a million lines in the global tables, that need to be aggregated into the report. This is not going to work well if there are thousands of lines of PL/pgSQL code involved with a system, that runs at thousands of TPS.
-
-For those reasons, this method of capturing profiling data is only useful for profiling a few rather infrequent but expensive PL/pgSQL functions.
-
 Collecting statistics at a timed interval
 -----------------------------------------
 
-Instead of collecting the in-memory-data after each individual transaction, we can configure it to copy the in-memory-data only every N seconds to the global collected-data tables (and reset the in-memory counters). The collecting happens when a PL/pgSQL function exits and the timer has elapsed. This is not as accurate because if that automatic collection happens in a transaction, that later rolls back, those statistics get lost. The last interval at the end is also lost. But for the example at hand it is certainly suitable.
+Instead of collecting the local-data after each individual transaction, we can configure it to copy the local-data only every N seconds to the shared hash tables (and reset the local-data counters). The collecting happens at each transaction commit/rollback as well as when a PL/pgSQL function exits and the timer has elapsed.
 
 For this we use a slightly different pgbench custom profile, [`pgbench_pl.interval.profile`](../examples/pgbench_pl.interval.profile).
 
@@ -178,7 +172,7 @@ SET plprofiler.save_interval TO 10;
 SELECT tpcb(:aid, :bid, :tid, :delta);
 ```
 
-I am not showing the resulting report for that because it is almost identical to the previous one. However, the collected-data in the global tables shrunk from almost a million rows to undere 20,000. Also, our performance is back up to 135 TPS.
+I am not showing the resulting report for that because it is almost identical to the previous one.
 
 Collecting statistics via ALTER USER
 ------------------------------------
@@ -213,19 +207,17 @@ This by itself is not a problem. The **plprofiler** will be loaded and place all
 
 at the beginning of all the callback functions. One of the callback functions is called at every function enter/exit and at every PL statement start/end (only the statements, that actually have runtime functionality). In the great scheme of things, this overhead is negligible.
 
-With `shared_preload_libraries` configured (and the database server restarted to let that take effect) and the collected-data tables empty (run `plprofiler reset-data`) we launch `pgbench` in the background and verify that no statistics are being collected in `pl_profiler_linestats_data` and `pl_profiler_callgraph_data`. After a while we get one of the pgbench backend PIDs by examining the system view `pg_stat_activity`. With that PID we run
+With `shared_preload_libraries` configured (and the database server restarted to let that take effect) and the shared-data empty (run `plprofiler reset`) we launch `pgbench` in the background. After a while we get one of the pgbench backend PIDs by examining the system view `pg_stat_activity`. With that PID we run
 
 ```
-plprofiler reset-data
+plprofiler reset
 plprofiler monitor --pid <PID> --interval 10 --duration 300
-plprofiler report --from-data --name tpcb-using-monitor --output tpcb-using-monitor.html
+plprofiler report --from-shared --name tpcb-using-monitor --output tpcb-using-monitor.html
 ```
 
 The `plprofiler monitor` command is using `ALTER SYSTEM ...` and `SELECT pg_reload_conf()` to enable profiling and turn it back off after the specified duration. This obviously will only work with a PostgreSQL database version 9.4 or newer. As with any database maintenance operations, this should only be done in a connection loss safe environment as losing the connection in the middle of the monitoring would leave those settings behind permanently.
 
 Leaving out the --pid option will cause ALL active backends to save their stats at the specified interval.
-
-Since this time we were only capturing profiling data from one out of 24 backends, the total number of data rows colleted over 5 minutes is 731. But since they are the result of 10 second interval summaries, they are just as accurate as the previous example. Again I am not including the actual **plprofiler** output because it is again just a repetition of what we already know.
 
 Fixing the performance problem
 ------------------------------
@@ -239,14 +231,14 @@ CREATE INDEX pgbench_accounts_aid_idx ON pgbench_accounts (aid);
 With that in place we use our last method of capturing profiling data once more to generate the last report for this tutorial.
 
 ```
-plprofiler reset-data
+plprofiler reset
 plprofiler monitor --pid <PID> --interval 10 --duration 300
-plprofiler report --from-data --name tpcb-problem-fixed --output tpcb-problem-fixed.html
+plprofiler report --from-shared --name tpcb-problem-fixed --output tpcb-problem-fixed.html
 ```
 [ ![tpcb-problem-fixed.hmtl](images/tpcb-problem-fixed.png) ](http://wi3ck.info/plprofiler/doc/tpcb-problem-fixed.html)
 [`doc/tpcb-problem-fixed.html`](http://wi3ck.info/plprofiler/doc/tpcb-problem-fixed.html)
 
-The performance profile is now completely reversed. The access to pgbench_accounts is a small fraction (1.52% with 0.44% out of that accouting for fetching the new account balance) of the overall time spent. The access to pgbench_tellers and pgbench_branches completely dominates the picture. This is how a pgbench running inside of shared buffer is supposed to look like. Because the tellers and branches tables are so small, there is tremendous row level lock contention and constant bloat on them.
+The performance profile is now completely reversed. The access to pgbench_accounts is a small fraction (1.52% with 0.44% out of that accouting for fetching the new account balance) of the overall time spent. The access to pgbench_tellers and pgbench_branches completely dominates the picture. This is how a pgbench running inside of shared buffers is supposed to look like. Because the tellers and branches tables are so small, there is tremendous row level lock contention and constant bloat on them.
 
 The overall performance of pgbench went from the original 136 TPS to a whooping 
 
