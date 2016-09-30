@@ -3,7 +3,7 @@ from setuptools import setup
 setup(
     name = 'plprofiler',
     description = 'PL/pgSQL Profiler command line tool',
-    version = '3-BETA3',
+    version = '4-DEV',
     author = 'Jan Wieck',
     author_email = 'janw@openscg.com',
     url = 'https://bitbucket.org/openscg/plprofiler/overview',
