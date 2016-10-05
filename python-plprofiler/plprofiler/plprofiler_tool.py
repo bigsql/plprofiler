@@ -813,7 +813,7 @@ def run_command(argv):
 
     plp.enable()
     plp.reset_local()
-    plp.execute_sql(opt_query)
+    plp.execute_sql(opt_query, sys.stdout)
 
     # ----
     # Create our config.
