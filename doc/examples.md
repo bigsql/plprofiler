@@ -170,7 +170,7 @@ For this we use a slightly different pgbench custom profile, [`pgbench_pl.interv
 \setrandom tid 1 :ntellers
 \setrandom delta -5000 5000
 SET plprofiler.enabled TO true;
-SET plprofiler.save_interval TO 10;
+SET plprofiler.collect_interval TO 10;
 SELECT tpcb(:aid, :bid, :tid, :delta);
 ```
 
@@ -187,7 +187,7 @@ The above can also be done without changing the application code at all. Instead
 
 ```
 ALTER USER myuser SET plprofiler.enabled TO on;
-ALTER USER myuser SET plprofiler.save_interval TO 10;
+ALTER USER myuser SET plprofiler.collect_interval TO 10;
 ```
 
 This has the exact same effect as the last example. It of course requires that the application reconnects after the `ALTER USER ...` statements to start collecting data, and it better reconnect once more when we are done profiling and did the corresponding `ALTER USER ... RESET ...` commands. So this is still not suitable for profiling a live production system since it is too disruptive.

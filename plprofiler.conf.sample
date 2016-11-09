@@ -9,7 +9,7 @@
 #plprofiler.enable_pid = 0					# Enable the profiler for one
 											# specific PID regardless of the
 											# .enabled flag.
-#plprofiler.save_interval = 0				# Interval in seconds when the
+#plprofiler.collect_interval = 0				# Interval in seconds when the
 											# profiler will save the stats,
 											# collected in hashtables, into
 											# the permanent _data tables.

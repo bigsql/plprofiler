@@ -3,5 +3,5 @@
 \set tid random(1, 10 * :scale)
 \set delta random(-5000, 5000)
 SET plprofiler.enabled TO true;
-SET plprofiler.save_interval TO 10;
+SET plprofiler.collect_interval TO 10;
 SELECT tpcb(:aid, :bid, :tid, :delta);
