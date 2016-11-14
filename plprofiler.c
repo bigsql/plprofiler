@@ -1907,7 +1907,7 @@ pl_profiler_reset_shared(PG_FUNCTION_ARGS)
 	hash_seq_init(&hash_seq, functions_shared);
 	while ((lsent = hash_seq_search(&hash_seq)) != NULL)
 	{
-		hash_search(callgraph_shared, &(lsent->key), HASH_REMOVE, NULL);
+		hash_search(functions_shared, &(lsent->key), HASH_REMOVE, NULL);
 	}
 
 	LWLockRelease(plpss->lock);
