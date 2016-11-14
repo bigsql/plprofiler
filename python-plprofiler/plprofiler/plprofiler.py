@@ -378,6 +378,9 @@ class plprofiler:
             func_oids_by_user = True
             func_oids = [int(x) for x in func_oids]
 
+        if len(func_oids) == 0:
+            raise Exception("No profiling data found")
+
         # ----
         # Get an alphabetically sorted list of the selected functions.
         # ----
@@ -547,6 +550,9 @@ class plprofiler:
         else:
             func_oids_by_user = True
             func_oids = [int(x) for x in func_oids]
+
+        if len(func_oids) == 0:
+            raise Exception("No profiling data found")
 
         # ----
         # Get an alphabetically sorted list of the selected functions.
@@ -731,6 +737,9 @@ class plprofiler:
         else:
             func_oids_by_user = True
             func_oids = [int(x) for x in func_oids]
+
+        if len(func_oids) == 0:
+            raise Exception("No profiling data found")
 
         # ----
         # Get an alphabetically sorted list of the selected functions.
