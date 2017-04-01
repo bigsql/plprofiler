@@ -959,23 +959,27 @@ class plprofiler:
                 if output is not None:
                     print >> output, query
                 start_time = time.time()
-                cur.execute(query)
-                end_time = time.time()
-                if cur.description is not None:
-                    if cur.rowcount == 0:
-                        if output is not None:
-                            print >> output, "(0 rows)"
-                    else:
-                        max_col_len = max([len(d.name) for d in cur.description])
-                        cols = ['  ' + ' '*(max_col_len - len(d[0])) + d[0] + ':'
-                                    for d in cur.description]
-                        if output is not None:
-                            for row in cur:
-                                print >> output, "-- row" + str(cur.rownumber) + ":"
-                                for col in range(0, len(cols)):
-                                    print >> output, cols[col], str(row[col])
-                            print >> output, "----"
-                            print >> output, "(%d rows)" %(cur.rowcount, )
+                try:
+                    cur.execute(query)
+                    end_time = time.time()
+                    if cur.description is not None:
+                        if cur.rowcount == 0:
+                            if output is not None:
+                                print >> output, "(0 rows)"
+                        else:
+                            max_col_len = max([len(d.name) for d in cur.description])
+                            cols = ['  ' + ' '*(max_col_len - len(d[0])) + d[0] + ':'
+                                        for d in cur.description]
+                            if output is not None:
+                                for row in cur:
+                                    print >> output, "-- row" + str(cur.rownumber) + ":"
+                                    for col in range(0, len(cols)):
+                                        print >> output, cols[col], str(row[col])
+                                print >> output, "----"
+                                print >> output, "(%d rows)" %(cur.rowcount, )
+                except Exception as err:
+                    end_time = time.time()
+                    print >> output, "ERROR: " + str(err)
                 latency = end_time - start_time
                 if output is not None:
                     print >> output, cur.statusmessage, "(%.3f seconds)" %latency
