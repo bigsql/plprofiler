@@ -23,10 +23,6 @@
 #if PG_VERSION_NUM >= 90300
 #include "access/htup_details.h"
 #endif
-#if PG_VERSION_NUM < 90400
-#include "access/transam.h"
-#include "utils/tqual.h"
-#endif
 
 #include "access/sysattr.h"
 #include "catalog/indexing.h"

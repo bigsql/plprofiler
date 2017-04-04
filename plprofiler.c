@@ -72,7 +72,6 @@ static callGraphKey		graph_stack;
 static instr_time		graph_stack_entry[PL_MAX_STACK_DEPTH];
 static uint64			graph_stack_child_time[PL_MAX_STACK_DEPTH];
 static int				graph_stack_pt = 0;
-static TransactionId	graph_current_xid = InvalidTransactionId;
 static time_t			last_collect_time = 0;
 static bool				have_new_local_data = false;
 
@@ -392,29 +391,12 @@ profiler_func_init(PLpgSQL_execstate *estate, PLpgSQL_function *func )
 static void
 profiler_func_beg(PLpgSQL_execstate *estate, PLpgSQL_function *func)
 {
-	TransactionId	current_xid;
-
 	if (!profiler_enabled && MyProcPid != profiler_enable_pid)
 		return;
 
 	/* Ignore anonymous code block. */
 	if (estate->plugin_info == NULL)
 		return;
-
-	/* Sanity check for the call stack. */
-	current_xid = GetTopTransactionId();
-	if (graph_current_xid != current_xid && graph_stack_pt > 0)
-	{
-		/*
-		 * We have a call stack but it started in another transaction.
-		 * This only happens when a transaction aborts and the call stack
-		 * is not properly unwound down to zero depth. Unwind it here.
-		 */
-		elog(DEBUG1, "plprofiler: stale call stack reset");
-		while (graph_stack_pt > 0)
-			callgraph_pop_one();
-	}
-	graph_current_xid = current_xid;
 
 	/*
 	 * Push this function Oid onto the stack, remember the entry time and
