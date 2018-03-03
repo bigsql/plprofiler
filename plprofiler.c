@@ -8,6 +8,12 @@
  * Copyright (c) 2008-2014, PostgreSQL Global Development Group
  * Copyright 2006,2007 - EnterpriseDB, Inc.
  *
+ * Major Change History:
+ * 2012 - Removed from PostgreSQL plDebugger Extension
+ * 2015 - Resurrected as standalone plProfiler by OpenSCG
+ * 2016 - Rewritten as v2 to use shared hash tables, have lower overhead
+ *			- v3 Major performance improvements, flame graph UI
+ *
  *-------------------------------------------------------------------------
  */
 
@@ -1980,4 +1986,3 @@ pl_profiler_lines_overflow(PG_FUNCTION_ARGS)
 
 	PG_RETURN_BOOL(plpss->lines_overflow);
 }
-
