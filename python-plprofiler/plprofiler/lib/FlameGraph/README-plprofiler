@@ -1,0 +1,11 @@
+This directory is a stripped down to the bare minimum version
+of Brendan D. Gregg's famous FlameGraph script collection.
+
+The plprofiler produces the input format of flamegraph.pl. So
+nothing else from the project is really needed and therfore
+there is no need to include it in this embedded lib directory.
+
+If you are looking for the full FlameGraph package, please
+visit
+
+    http://www.brendangregg.com/
