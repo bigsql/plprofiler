@@ -9,16 +9,10 @@
 #plprofiler.enable_pid = 0					# Enable the profiler for one
 											# specific PID regardless of the
 											# .enabled flag.
-#plprofiler.collect_interval = 0				# Interval in seconds when the
+#plprofiler.collect_interval = 0			# Interval in seconds when the
 											# profiler will save the stats,
-											# collected in hashtables, into
-											# the permanent _data tables.
-											# The default 0 means don't save.
-#plprofiler.save_linestats_table = 'pl_profiler_linestats_data'
-#plprofiler.save_callgraph_table = 'pl_profiler_callgraph_data'
-											# The "permanent" table names
-											# where pl_profiler_save_stats()
-											# and the automatic, interval
-											# driven saving will append the
-											# stats.
+											# collected in local hash tables
+											# into the shared hash tables.
+											# The default 0 means only save
+											# at transaction end.
 
