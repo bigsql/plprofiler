@@ -44,3 +44,9 @@ Click on the screenshot below to see the actual, interactive report in your brow
 Please see the [Examples](doc/examples.md) for more details about this interactive report.
 
 Credits for the FlameGraph go to [Brendan Gregg](http://www.brendangregg.com/). His `flamegraph.pl` script is used by the **plprofiler** utility to generate these incredibly powerful, interactive SVGs.
+
+#####Major Change History
+* 2012 - Removed from PostgreSQL plDebugger Extension
+* 2015 - Resurrected as standalone plProfiler by OpenSCG
+* 2016 - Rewritten as v2 to use shared hash tables, have lower overhead
+    - v3 Major performance improvements, flame graph UI

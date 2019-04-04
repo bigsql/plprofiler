@@ -1,3 +1,9 @@
+# Major Change History:
+# 2012 - Removed from PostgreSQL plDebugger Extension
+# 2015 - Resurrected as standalone plProfiler by OpenSCG
+# 2016 - Rewritten as v2 to use shared hash tables, have lower overhead
+#			- v3 Major performance improvements, flame graph UI
+
 # plprofiler extension control file
 comment = 'server-side support for profiling PL/pgSQL functions'
 default_version = '3.0'

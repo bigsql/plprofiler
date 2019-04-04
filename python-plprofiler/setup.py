@@ -2,23 +2,18 @@ from setuptools import setup
 
 setup(
     name = 'plprofiler',
-    description = 'PL/pgSQL Profiler command line tool',
-    version = '3.2',
+    description = 'PL/pgSQL Profiler module and command line tool',
+    version = '3.4',
     author = 'Jan Wieck',
-    author_email = 'janw@openscg.com',
+    author_email = 'jan@wi3ck.info',
     url = 'https://bitbucket.org/openscg/plprofiler/overview',
-    license = 'Artistic License',
+    license = 'Artistic License and CDDL',
     packages = ['plprofiler', ],
     package_data = {
         'plprofiler': [
             'lib/FlameGraph/README',
-            'lib/FlameGraph/*.pl',
-            'lib/FlameGraph/*.txt',
-            'lib/FlameGraph/*.svg',
-            'lib/FlameGraph/*.awk',
-            'lib/FlameGraph/demos/*',
-            'lib/FlameGraph/dev/*',
-            'lib/FlameGraph/docs/*',
+            'lib/FlameGraph/README-plprofiler',
+            'lib/FlameGraph/flamegraph.pl',
         ],
     },
     install_requires = [
