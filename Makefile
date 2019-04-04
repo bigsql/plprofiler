@@ -8,9 +8,10 @@ MODULE_big = plprofiler
 OBJS = plprofiler.o
 
 EXTENSION = plprofiler
-DATA =	plprofiler--1.0--2.0.sql	\
+DATA =	plprofiler--1.0--2.0.sql \
 		plprofiler--2.0--3.0.sql \
-		plprofiler--3.0.sql
+		plprofiler--3.0--3.5.sql \
+		plprofiler--3.5.sql
 
 ifdef USE_PGXS
 PG_CONFIG = pg_config
