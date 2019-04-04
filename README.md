@@ -49,4 +49,5 @@ Credits for the FlameGraph go to [Brendan Gregg](http://www.brendangregg.com/). 
 * 2012 - Removed from PostgreSQL plDebugger Extension
 * 2015 - Resurrected as standalone plProfiler by OpenSCG
 * 2016 - Rewritten as v2 to use shared hash tables, have lower overhead
-    - v3 Major performance improvements, flame graph UI
+* 2016 - v3 Major performance improvements, flame graph UI
+* 2019 - v3.5 Placed all extension objects under role plprofiler for easier grant
