@@ -1,15 +1,9 @@
--- Major Change History:
--- 2012 - Removed from PostgreSQL plDebugger Extension
--- 2015 - Resurrected as standalone plProfiler by OpenSCG
--- 2016 - Rewritten as v2 to use shared hash tables, have lower overhead
---			- v3 Major performance improvements, flame graph UI
-
 -- complain if script is sourced in psql, rather than via CREATE EXTENSION
 \echo Use "CREATE EXTENSION plprofiler" to load this file. \quit
 
 DO $$
 BEGIN
-	-- Create role plprofiler if it doesn't exist and grant it to rds_superuser
+	-- Create role plprofiler if it doesn't exist
     IF NOT EXISTS (SELECT 1 FROM pg_catalog.pg_authid WHERE rolname = 'plprofiler') THEN
 	    CREATE ROLE plprofiler WITH NOLOGIN;
 	END IF;
@@ -23,6 +17,16 @@ END;
 $$ LANGUAGE plpgsql;
 
 -- Register functions.
+
+CREATE FUNCTION pl_profiler_version()
+RETURNS integer
+AS $$
+BEGIN
+	RETURN 305;
+END;
+$$ LANGUAGE plpgsql;
+ALTER FUNCTION pl_profiler_version() OWNER TO plprofiler;
+GRANT EXECUTE ON FUNCTION pl_profiler_version() TO public;
 
 CREATE FUNCTION pl_profiler_linestats_local(
     OUT func_oid oid,
