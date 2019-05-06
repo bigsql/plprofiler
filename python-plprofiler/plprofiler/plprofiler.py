@@ -886,7 +886,6 @@ class plprofiler:
         cur.close()
 
     def enable_monitor(self, opt_pid = None, opt_interval = 10):
-        self.dbconn.autocommit = True
         cur = self.dbconn.cursor()
         cur.execute("""
                 SELECT setting
@@ -901,7 +900,7 @@ class plprofiler:
                      WHERE name = 'server_version'
                 """)
             server_version = cur.fetchone()[0]
-            self.dbconn.autocommit = False
+            self.dbconn.rollback()
             raise Exception(("ERROR: monitor command not supported on " +
                             "server version %s. Perform monitoring manually " +
                             "via postgresql.conf changes and reloading " +
@@ -914,20 +913,18 @@ class plprofiler:
             cur.execute("""SELECT pl_profiler_set_enabled_global(true)""")
         cur.execute("""SELECT pl_profiler_set_collect_interval(%s)""", (opt_interval, ))
         cur.execute("""RESET search_path""")
-        self.dbconn.autocommit = False
         cur.close()
+        self.dbconn.commit()
 
     def disable_monitor(self):
-        self.dbconn.autocommit = True
         cur = self.dbconn.cursor()
         cur.execute("""SET search_path TO %s""", (self.profiler_namespace, ))
         cur.execute("""SELECT pl_profiler_set_enabled_global(false)""")
         cur.execute("""SELECT pl_profiler_set_enabled_pid(0)""")
         cur.execute("""SELECT pl_profiler_set_collect_interval(0)""");
         cur.execute("""RESET search_path""")
-        cur.execute("""SELECT pg_catalog.pg_reload_conf()""")
-        self.dbconn.autocommit = False
         cur.close()
+        self.dbconn.commit()
 
     def reset_local(self):
         cur = self.dbconn.cursor()
@@ -955,7 +952,6 @@ class plprofiler:
 
     def execute_sql(self, sql, output = None):
         try:
-            self.dbconn.autocommit = True
             cur = self.dbconn.cursor()
             for query in sql_split(sql).get_statements():
                 if output is not None:
@@ -969,10 +965,10 @@ class plprofiler:
                             if output is not None:
                                 print >> output, "(0 rows)"
                         else:
-                            max_col_len = max([len(d.name) for d in cur.description])
-                            cols = ['  ' + ' '*(max_col_len - len(d[0])) + d[0] + ':'
-                                        for d in cur.description]
                             if output is not None:
+                                max_col_len = max([len(d[0]) for d in cur.description])
+                                cols = ['  ' + ' '*(max_col_len - len(d[0])) + d[0] + ':'
+                                            for d in cur.description]
                                 for row in cur:
                                     print >> output, "-- row" + str(cur.rownumber) + ":"
                                     for col in range(0, len(cols)):
@@ -986,9 +982,7 @@ class plprofiler:
                 if output is not None:
                     print >> output, cur.statusmessage, "(%.3f seconds)" %latency
                     print >> output, ""
-            self.dbconn.autocommit = False
         except Exception as err:
-            self.dbconn.autocommit = False
             raise err
         self.dbconn.rollback()
 
