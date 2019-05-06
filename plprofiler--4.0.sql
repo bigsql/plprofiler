@@ -22,7 +22,7 @@ CREATE FUNCTION pl_profiler_version()
 RETURNS integer
 AS $$
 BEGIN
-	RETURN 305;
+	RETURN 40000;
 END;
 $$ LANGUAGE plpgsql;
 ALTER FUNCTION pl_profiler_version() OWNER TO plprofiler;
@@ -123,12 +123,58 @@ AS 'MODULE_PATHNAME'
 LANGUAGE C;
 ALTER FUNCTION pl_profiler_reset_shared() OWNER TO plprofiler;
 
-CREATE FUNCTION pl_profiler_enable(enabled bool)
+CREATE FUNCTION pl_profiler_set_enabled_global(enabled bool)
 RETURNS bool
 AS 'MODULE_PATHNAME'
 LANGUAGE C;
-ALTER FUNCTION pl_profiler_enable(bool) OWNER TO plprofiler;
-GRANT EXECUTE ON FUNCTION pl_profiler_enable(bool) TO public;
+ALTER FUNCTION pl_profiler_set_enabled_global(bool) OWNER TO plprofiler;
+
+CREATE FUNCTION pl_profiler_get_enabled_global()
+RETURNS bool
+AS 'MODULE_PATHNAME'
+LANGUAGE C;
+ALTER FUNCTION pl_profiler_get_enabled_global() OWNER TO plprofiler;
+GRANT EXECUTE ON FUNCTION pl_profiler_get_enabled_global() TO public;
+
+CREATE FUNCTION pl_profiler_set_enabled_local(enabled bool)
+RETURNS bool
+AS 'MODULE_PATHNAME'
+LANGUAGE C;
+ALTER FUNCTION pl_profiler_set_enabled_local(bool) OWNER TO plprofiler;
+GRANT EXECUTE ON FUNCTION pl_profiler_set_enabled_local(bool) TO public;
+
+CREATE FUNCTION pl_profiler_get_enabled_local()
+RETURNS bool
+AS 'MODULE_PATHNAME'
+LANGUAGE C;
+ALTER FUNCTION pl_profiler_get_enabled_local() OWNER TO plprofiler;
+GRANT EXECUTE ON FUNCTION pl_profiler_get_enabled_local() TO public;
+
+CREATE FUNCTION pl_profiler_set_enabled_pid(pid int4)
+RETURNS bool
+AS 'MODULE_PATHNAME'
+LANGUAGE C;
+ALTER FUNCTION pl_profiler_set_enabled_pid(int4) OWNER TO plprofiler;
+
+CREATE FUNCTION pl_profiler_get_enabled_pid()
+RETURNS bool
+AS 'MODULE_PATHNAME'
+LANGUAGE C;
+ALTER FUNCTION pl_profiler_get_enabled_pid() OWNER TO plprofiler;
+GRANT EXECUTE ON FUNCTION pl_profiler_get_enabled_pid() TO public;
+
+CREATE FUNCTION pl_profiler_set_collect_interval(seconds int4)
+RETURNS bool
+AS 'MODULE_PATHNAME'
+LANGUAGE C;
+ALTER FUNCTION pl_profiler_set_collect_interval(int4) OWNER TO plprofiler;
+
+CREATE FUNCTION pl_profiler_get_collect_interval()
+RETURNS bool
+AS 'MODULE_PATHNAME'
+LANGUAGE C;
+ALTER FUNCTION pl_profiler_get_collect_interval() OWNER TO plprofiler;
+GRANT EXECUTE ON FUNCTION pl_profiler_get_collect_interval() TO public;
 
 CREATE FUNCTION pl_profiler_collect_data()
 RETURNS int4

@@ -52,7 +52,6 @@ static void callgraph_pop(Oid func_oid);
 static void callgraph_check(Oid func_oid);
 static void callgraph_collect(uint64 us_elapsed, uint64 us_self,
 							  uint64 us_children);
-static void profiler_enabled_assign(bool newval, void *extra);
 static int32 profiler_collect_data(void);
 static void profiler_xact_callback(XactEvent event, void *arg);
 
@@ -67,9 +66,9 @@ static profilerSharedState *profiler_shared_state = NULL;
 static HTAB			   *functions_shared = NULL;
 static HTAB			   *callgraph_shared = NULL;
 
-static bool				profiler_enabled = false;
-static int				profiler_enable_pid = 0;
-static int				profiler_collect_interval = 0;
+static bool				profiler_first_call_in_xact = true;
+static bool				profiler_active = false;
+static bool				profiler_enabled_local = false;
 static int				profiler_max_functions = PL_MIN_FUNCTIONS;
 static int				profiler_max_lines = PL_MIN_LINES;
 static int				profiler_max_callgraph = PL_MIN_CALLGRAPH;
@@ -103,46 +102,6 @@ void
 _PG_init(void)
 {
 	PLpgSQL_plugin **plugin_ptr;
-
-	/* Register our custom configuration variables. */
-
-	DefineCustomBoolVariable("plprofiler.enabled",
-							"Enable or disable plprofiler globally",
-							NULL,
-							&profiler_enabled,
-							false,
-							PGC_USERSET,
-							0,
-							NULL,
-							profiler_enabled_assign,
-							NULL);
-
-	DefineCustomIntVariable("plprofiler.enable_pid",
-							"Enable or disable plprofiler for a specific pid",
-							NULL,
-							&profiler_enable_pid,
-							0,
-							0,
-							INT_MAX,
-							PGC_USERSET,
-							0,
-							NULL,
-							NULL,
-							NULL);
-
-	DefineCustomIntVariable("plprofiler.collect_interval",
-							"Interval in seconds for saving profiler stats "
-							"in the permanent tables.",
-							NULL,
-							&profiler_collect_interval,
-							0,
-							0,
-							3600,
-							PGC_USERSET,
-							0,
-							NULL,
-							NULL,
-							NULL);
 
 	/* Link us into the PL/pgSQL executor. */
 	plugin_ptr = (PLpgSQL_plugin **)find_rendezvous_variable("PLpgSQL_plugin");
@@ -309,7 +268,29 @@ profiler_func_init(PLpgSQL_execstate *estate, PLpgSQL_function *func )
 	linestatsEntry	   *linestats_entry;
 	bool				linestats_found;
 
-	if (!profiler_enabled && MyProcPid != profiler_enable_pid)
+	/*
+	 * On first call within a transaction we determine if the profiler
+	 * is active or not. This means that starting/stopping to collect
+	 * data will only happen on a transaction boundary.
+	 */
+	if (profiler_first_call_in_xact)
+	{
+		profiler_first_call_in_xact = false;
+
+		if (profiler_shared_state != NULL)
+		{
+			profiler_active = (
+				profiler_shared_state->profiler_enabled_global ||
+				profiler_shared_state->profiler_enabled_pid == MyProcPid ||
+				profiler_enabled_local);
+		}
+		else
+		{
+			profiler_active = profiler_enabled_local;
+		}
+	}
+
+	if (!profiler_active)
 	{
 		/*
 		 * The profiler can be enabled/disabled via changing postgresql.conf
@@ -397,7 +378,7 @@ profiler_func_init(PLpgSQL_execstate *estate, PLpgSQL_function *func )
 static void
 profiler_func_beg(PLpgSQL_execstate *estate, PLpgSQL_function *func)
 {
-	if (!profiler_enabled && MyProcPid != profiler_enable_pid)
+	if (!profiler_active)
 		return;
 
 	/* Ignore anonymous code block. */
@@ -426,7 +407,7 @@ profiler_func_end(PLpgSQL_execstate *estate, PLpgSQL_function *func)
 	linestatsEntry	   *entry;
 	int					i;
 
-	if (!profiler_enabled && MyProcPid != profiler_enable_pid)
+	if (!profiler_active)
 		return;
 
 	/* Ignore anonymous code block. */
@@ -472,12 +453,15 @@ profiler_func_end(PLpgSQL_execstate *estate, PLpgSQL_function *func)
 	 * Finally if a plprofiler.collect_interval is configured, save and reset
 	 * the stats if the interval has elapsed.
 	 */
-	if ((profiler_enabled || MyProcPid == profiler_enable_pid)
-			&& profiler_collect_interval > 0)
+	if (profiler_shared_state != NULL &&
+		(profiler_shared_state->profiler_enabled_global ||
+		 MyProcPid == profiler_shared_state->profiler_enabled_pid) &&
+		profiler_shared_state->profiler_collect_interval > 0)
 	{
 		time_t	now = time(NULL);
 
-		if (now >= last_collect_time + profiler_collect_interval)
+		if (now >= last_collect_time +
+				   profiler_shared_state->profiler_collect_interval)
 		{
 		    profiler_collect_data();
 			last_collect_time = now;
@@ -501,7 +485,7 @@ profiler_stmt_beg(PLpgSQL_execstate *estate, PLpgSQL_stmt *stmt)
 	profilerLineInfo   *line_info;
 	profilerInfo	   *profiler_info;
 
-	if (!profiler_enabled && MyProcPid != profiler_enable_pid)
+	if (!profiler_active)
 		return;
 
 	/* Ignore anonymous code block. */
@@ -539,7 +523,7 @@ profiler_stmt_end(PLpgSQL_execstate *estate, PLpgSQL_stmt *stmt)
 	instr_time			end_time;
 	uint64				elapsed;
 
-	if (!profiler_enabled && MyProcPid != profiler_enable_pid)
+	if (!profiler_active)
 		return;
 
 	/* Ignore anonymous code block. */
@@ -931,12 +915,6 @@ callgraph_collect(uint64 us_elapsed, uint64 us_self, uint64 us_children)
 	}
 }
 
-static void
-profiler_enabled_assign(bool newval, void *extra)
-{
-	profiler_enabled = newval;
-}
-
 static int32
 profiler_collect_data(void)
 {
@@ -1161,8 +1139,8 @@ profiler_xact_callback(XactEvent event, void *arg)
 	Assert(profiler_shared_state != NULL);
 
 	/* Collect the statistics if needed. */
-	if ((profiler_enabled || MyProcPid == profiler_enable_pid) &&
-		profiler_collect_interval > 0)
+	if (profiler_active &&
+		profiler_shared_state->profiler_collect_interval > 0)
 	{
 		switch (event)
 		{
@@ -1179,6 +1157,9 @@ profiler_xact_callback(XactEvent event, void *arg)
 				break;
 		}
 	}
+
+	/* Tell func_init that we need to evaluate the new active state. */
+	profiler_first_call_in_xact = true;
 
 	/* We can also unwind the callstack here in case of abort. */
 	callgraph_check(InvalidOid);
@@ -1904,20 +1885,137 @@ pl_profiler_reset_shared(PG_FUNCTION_ARGS)
 }
 
 /* -------------------------------------------------------------------
- * pl_profiler_enable()
+ * pl_profiler_set_enabled_global()
  *
- *	Turn profiling on or off.
+ *	Turn global profiling on or off.
  * -------------------------------------------------------------------
  */
 Datum
-pl_profiler_enable(PG_FUNCTION_ARGS)
+pl_profiler_set_enabled_global(PG_FUNCTION_ARGS)
 {
 	if (PG_ARGISNULL(0))
 		PG_RETURN_NULL();
 
-	profiler_enabled = PG_GETARG_BOOL(0);
+	if (profiler_shared_state == NULL)
+		elog(ERROR, "plprofiler not loaded via shared_preload_libraries");
+	else
+		profiler_shared_state->profiler_enabled_global = PG_GETARG_BOOL(0);
 
-	PG_RETURN_BOOL(profiler_enabled);
+	PG_RETURN_BOOL(profiler_shared_state->profiler_enabled_global);
+}
+
+/* -------------------------------------------------------------------
+ * pl_profiler_get_enabled_global()
+ *
+ *	Report global profiling state.
+ * -------------------------------------------------------------------
+ */
+Datum
+pl_profiler_get_enabled_global(PG_FUNCTION_ARGS)
+{
+	if (profiler_shared_state == NULL)
+		elog(ERROR, "plprofiler not loaded via shared_preload_libraries");
+
+	PG_RETURN_BOOL(profiler_shared_state->profiler_enabled_global);
+}
+
+/* -------------------------------------------------------------------
+ * pl_profiler_set_enabled_local()
+ *
+ *	Turn local profiling on or off.
+ * -------------------------------------------------------------------
+ */
+Datum
+pl_profiler_set_enabled_local(PG_FUNCTION_ARGS)
+{
+	if (PG_ARGISNULL(0))
+		PG_RETURN_NULL();
+
+	profiler_enabled_local = PG_GETARG_BOOL(0);
+
+	PG_RETURN_BOOL(profiler_enabled_local);
+}
+
+/* -------------------------------------------------------------------
+ * pl_profiler_get_enabled_local()
+ *
+ *	Report local profiling state.
+ * -------------------------------------------------------------------
+ */
+Datum
+pl_profiler_get_enabled_local(PG_FUNCTION_ARGS)
+{
+	PG_RETURN_BOOL(profiler_enabled_local);
+}
+
+/* -------------------------------------------------------------------
+ * pl_profiler_set_enabled_pid()
+ *
+ *	Turn pid profiling on or off.
+ * -------------------------------------------------------------------
+ */
+Datum
+pl_profiler_set_enabled_pid(PG_FUNCTION_ARGS)
+{
+	if (PG_ARGISNULL(0))
+		PG_RETURN_NULL();
+
+	if (profiler_shared_state == NULL)
+		elog(ERROR, "plprofiler not loaded via shared_preload_libraries");
+	else
+		profiler_shared_state->profiler_enabled_pid = PG_GETARG_INT32(0);
+
+	PG_RETURN_INT32(profiler_shared_state->profiler_enabled_pid);
+}
+
+/* -------------------------------------------------------------------
+ * pl_profiler_get_enabled_pid()
+ *
+ *	Report pid profiling state.
+ * -------------------------------------------------------------------
+ */
+Datum
+pl_profiler_get_enabled_pid(PG_FUNCTION_ARGS)
+{
+	if (profiler_shared_state == NULL)
+		elog(ERROR, "plprofiler not loaded via shared_preload_libraries");
+
+	PG_RETURN_INT32(profiler_shared_state->profiler_enabled_pid);
+}
+
+/* -------------------------------------------------------------------
+ * pl_profiler_set_collect_interval()
+ *
+ *	Turn pid profiling on or off.
+ * -------------------------------------------------------------------
+ */
+Datum
+pl_profiler_set_collect_interval(PG_FUNCTION_ARGS)
+{
+	if (PG_ARGISNULL(0))
+		PG_RETURN_NULL();
+
+	if (profiler_shared_state == NULL)
+		PG_RETURN_INT32(-1);
+	else
+		profiler_shared_state->profiler_collect_interval = PG_GETARG_INT32(0);
+
+	PG_RETURN_INT32(profiler_shared_state->profiler_collect_interval);
+}
+
+/* -------------------------------------------------------------------
+ * pl_profiler_get_collect_interval()
+ *
+ *	Report pid profiling state.
+ * -------------------------------------------------------------------
+ */
+Datum
+pl_profiler_get_collect_interval(PG_FUNCTION_ARGS)
+{
+	if (profiler_shared_state == NULL)
+		elog(ERROR, "plprofiler not loaded via shared_preload_libraries");
+
+	PG_RETURN_INT32(profiler_shared_state->profiler_collect_interval);
 }
 
 /* -------------------------------------------------------------------
