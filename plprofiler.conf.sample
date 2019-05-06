@@ -4,15 +4,13 @@
 #shared_preload_libraries = 'plprofiler'	# Add this to be able to use
 											# the .enabled and .enable_pid
 											# options.
-#plprofiler.enabled = false					# Enable/disable the profiler
-											# for all backends.
-#plprofiler.enable_pid = 0					# Enable the profiler for one
-											# specific PID regardless of the
-											# .enabled flag.
-#plprofiler.collect_interval = 0			# Interval in seconds when the
-											# profiler will save the stats,
-											# collected in local hash tables
-											# into the shared hash tables.
-											# The default 0 means only save
-											# at transaction end.
+
+#plprofiler.max_functions = 2000			# The number of functions that
+											# can be tracked in shared memory.
+
+#plprofiler.max_lines = 200000				# The number of source code lines
+											# that can be tracked.
+
+#plprofiler.max_callgraphs = 20000			# The number of different call
+											# graphs that can be tracked.
 
