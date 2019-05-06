@@ -1,17 +1,16 @@
 #!/usr/bin/env python
 
-import ConfigParser
+import configparser
 import getopt
 import json
 import os
-import StringIO
+from io import StringIO
 import subprocess
 import sys
 import tempfile
 import time
-import traceback
 
-from plprofiler import plprofiler
+from .plprofiler import plprofiler
 
 __all__ = ['main']
 
@@ -166,7 +165,6 @@ def save_command(argv):
             edit_config_info(config)
         except Exception as err:
             sys.stderr.write(str(err) + '\n')
-            traceback.print_exc()
             return 2
         opt_name = config['name']
 
@@ -177,7 +175,6 @@ def save_command(argv):
 
     except Exception as err:
         sys.stderr.write(str(err) + '\n')
-        traceback.print_exc()
         return 1
 
 def list_command(argv):
@@ -225,23 +222,23 @@ def list_command(argv):
         return 1
 
     if len(rows) == 0:
-        print "No saved data sets found"
+        print("No saved data sets found")
     else:
-        print ""
+        print("")
         max_name_len = 4
         for row in rows:
             if len(row[0]) > max_name_len:
                 max_name_len = len(row[0])
-        print 'Name' + ' '*(max_name_len - 4) + ' | Title'
-        print '-'*max_name_len + '-+-' + '-'*(79 - 3 - max_name_len)
+        print('Name' + ' '*(max_name_len - 4) + ' | Title')
+        print('-'*max_name_len + '-+-' + '-'*(79 - 3 - max_name_len))
         for row in rows:
             config = json.loads(row[1])
             pad = max_name_len - len(row[0])
-            print row[0] + ' '*pad + ' | ' + config.get('title', '')
+            print(row[0] + ' '*pad + ' | ' + config.get('title', ''))
 
-        print ""
-        print '(' + str(len(rows)) + ' data sets found)'
-        print ""
+        print("")
+        print('(' + str(len(rows)) + ' data sets found)')
+        print("")
     return 0
 
 def edit_command(argv):
@@ -508,7 +505,6 @@ def report_command(argv):
             edit_config_info(config)
         except Exception as err:
             sys.stderr.write(str(err) + '\n')
-            traceback.print_exc()
             return 2
         opt_name = config['name']
         report_data['config'] = config
@@ -626,7 +622,6 @@ def export_command(argv):
                 edit_config_info(config)
             except Exception as err:
                 sys.stderr.write(str(err) + '\n')
-                traceback.print_exc()
                 return 2
             report_data['config'] = config
 
@@ -709,7 +704,6 @@ def import_command(argv):
                 edit_config_info(config)
             except Exception as err:
                 sys.stderr.write(str(err) + '\n')
-                traceback.print_exc()
                 return 2
             report_data['config'] = config
 
@@ -835,7 +829,6 @@ def run_command(argv):
             edit_config_info(config)
         except Exception as err:
             sys.stderr.write(str(err) + '\n')
-            traceback.print_exc()
             return 2
         opt_name = config['name']
 
@@ -905,14 +898,14 @@ def monitor_command(argv):
     try:
         plp.enable_monitor(opt_pid, opt_interval)
     except Exception as err:
-        print str(err)
+        print(str(err))
         return 1
-    print "monitoring for %d seconds ..." %(int(opt_duration))
+    print("monitoring for %d seconds ..." %(int(opt_duration)))
     try:
         time.sleep(int(opt_duration))
     finally:
         plp.disable_monitor()
-    print "done."
+    print("done.")
 
     return 0
 
@@ -975,7 +968,7 @@ def edit_config_info(config):
             config[opt] = str(tmp_config.get(name, opt))
 
 def usage():
-    print """
+    print("""
 usage: plprofiler COMMAND [OPTIONS]
 
     plprofiler is a command line tool to control the plprofiler extension
@@ -1068,10 +1061,10 @@ COMMANDS:
     import          Imports the saved-datasets from a JSON file, created
                     with the export command.
 
-"""
+""")
 
 def help_run():
-    print """
+    print("""
 usage: plprofiler run [OPTIONS]
 
     Runs one or more SQL commands (hopefully invoking one or more PL/pgSQL
@@ -1101,10 +1094,10 @@ OPTIONS:
     --top=N         Include up to N function detail descriptions in the
                     report (default=10).
 
-"""
+""")
 
 def help_monitor():
-    print """
+    print("""
 usage: plprofiler monitor [OPTIONS]
 
     Turns profile data capturing and periodic saving on for either all
@@ -1145,10 +1138,10 @@ OPTIONS:
 
     --duration=SEC  Duration of the monitoring run in seconds.
 
-"""
+""")
 
 def help_reset():
-    print """
+    print("""
 usage: plprofiler reset
 
     Deletes all data from the shared hashtables. This affects all databases
@@ -1156,10 +1149,10 @@ usage: plprofiler reset
 
     This does NOT destroy any of the saved-datasets.
 
-"""
+""")
 
 def help_save():
-    print """
+    print("""
 usage: plprofiler save [OPTIONS]
 
     The save command is used to create a saved-dataset from shared-data.
@@ -1187,18 +1180,18 @@ NOTES:
     report configuration. This metadata can later be changed with the
     "edit" command.
 
-"""
+""")
 
 def help_list():
-    print """
+    print("""
 usage: plprofiler list
 
     Lists the available saved-datasets together with their TITLE.
 
-"""
+""")
 
 def help_edit():
-    print """
+    print("""
 usage: plprofiler edit [OPTIONS]
 
     Launches an editor with the metadata of the specified saved-dataset.
@@ -1209,10 +1202,10 @@ OPTIONS:
 
     --name=NAME     The name of the saved-dataset to edit.
 
-"""
+""")
 
 def help_report():
-    print """
+    print("""
 usage: plprofiler report [OPTIONS]
 
     Create an HTML report from either shared-data or a saved-dataset.
@@ -1235,10 +1228,10 @@ OPTIONS:
     --top=N         Include up to N function detail descriptions in the
                     report (default=10).
 
-"""
+""")
 
 def help_delete():
-    print """
+    print("""
 usage: plprofiler delete [OPTIONS]
 
     Delete the named saved-dataset.
@@ -1247,10 +1240,10 @@ OPTIONS:
 
     --name=NAME     The name of the saved-dataset to delete.
 
-"""
+""")
 
 def help_export():
-    print """
+    print("""
 usage: plprofiler export [OPTIONS]
 
     Export the shared-data or one or more saved-datasets as a JSON
@@ -1273,10 +1266,10 @@ OPTIONS:
 
     --output=FILE   Save the JSON export data in FILE (default=stdout).
 
-"""
+""")
 
 def help_import():
-    print """
+    print("""
 usage: plprofiler import [OPTIONS]
 
     Imports one or more datasets from an export file.
@@ -1293,4 +1286,4 @@ OPTIONS:
                     NAMEs, as they appear in the input file (or after
                     editing).
 
-"""
+""")

@@ -8,8 +8,8 @@ import psycopg2
 import json
 import time
 
-from plprofiler_report import plprofiler_report
-from sql_split import sql_split
+from .plprofiler_report import plprofiler_report
+from .sql_split import sql_split
 
 __all__ = ['plprofiler', ]
 
@@ -955,7 +955,7 @@ class plprofiler:
             cur = self.dbconn.cursor()
             for query in sql_split(sql).get_statements():
                 if output is not None:
-                    print >> output, query
+                    output.write(query + '\n')
                 start_time = time.time()
                 try:
                     cur.execute(query)
@@ -963,25 +963,25 @@ class plprofiler:
                     if cur.description is not None:
                         if cur.rowcount == 0:
                             if output is not None:
-                                print >> output, "(0 rows)"
+                                output.write("(0 rows)\n")
                         else:
                             if output is not None:
                                 max_col_len = max([len(d[0]) for d in cur.description])
                                 cols = ['  ' + ' '*(max_col_len - len(d[0])) + d[0] + ':'
                                             for d in cur.description]
                                 for row in cur:
-                                    print >> output, "-- row" + str(cur.rownumber) + ":"
+                                    output.write("-- row" + str(cur.rownumber) + ":\n")
                                     for col in range(0, len(cols)):
-                                        print >> output, cols[col], str(row[col])
-                                print >> output, "----"
-                                print >> output, "(%d rows)" %(cur.rowcount, )
+                                        output.write(cols[col] + ' ' + str(row[col]) + '\n')
+                                output.write("----\n")
+                                output.write("(%d rows)\n" %(cur.rowcount, ))
                 except Exception as err:
                     end_time = time.time()
-                    print >> output, "ERROR: " + str(err)
+                    output.write("ERROR: " + str(err) + '\n')
                 latency = end_time - start_time
                 if output is not None:
-                    print >> output, cur.statusmessage, "(%.3f seconds)" %latency
-                    print >> output, ""
+                    output.write(cur.statusmessage + " (%.3f seconds)\n" %latency)
+                    output.write("\n")
         except Exception as err:
             raise err
         self.dbconn.rollback()

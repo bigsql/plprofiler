@@ -129,12 +129,12 @@ class plprofiler_report:
                     stdin = subprocess.PIPE,
                     stdout = subprocess.PIPE,
                     stderr = subprocess.PIPE);
-        svg, err = proc.communicate(data)
+        svg, err = proc.communicate(data.encode('utf-8'))
 
         if proc.returncode != 0:
             raise Exception("flamegraph returned with exit code %d\n%s" %(
-                    proc.returncode, err))
-        return svg
+                    proc.returncode, str(err)))
+        return str(svg)
         # return "\n".join(svg.split("\n")[2:])
 
     def out(self, line):
