@@ -17,7 +17,8 @@ setup(
         ],
     },
     install_requires = [
-        'psycopg2',
+        'psycopg2-binary',
+        'configparser',
     ],
     entry_points = {
         'console_scripts': [
