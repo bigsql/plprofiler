@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 
-import configparser
+from configparser import RawConfigParser
 import getopt
 import json
 import os
@@ -924,7 +924,7 @@ def edit_config_info(config):
     # Create a ConfigParser that contains relevant sections of the config.
     # ----
     name = config['name']
-    tmp_config = ConfigParser.RawConfigParser()
+    tmp_config = RawConfigParser()
     tmp_config.add_section(name)
     for opt in opts:
         tmp_config.set(name, opt, str(config[opt]))
@@ -935,11 +935,11 @@ def edit_config_info(config):
     # file content from the ConfigParser, then change '\n' into 
     # os.linesep when creating the temp file.
     # ----
-    buf = StringIO.StringIO()
+    buf = StringIO()
     tmp_config.write(buf)
     tf = tempfile.NamedTemporaryFile(suffix=".tmp.conf", delete = False)
     tf_name = tf.name
-    tf.write(buf.getvalue().replace('\n', os.linesep))
+    tf.write(buf.getvalue().replace('\n', os.linesep).encode('utf-8'))
     tf.close()
 
     # ----
