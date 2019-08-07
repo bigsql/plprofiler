@@ -12,7 +12,8 @@ DATA =	plprofiler--1.0--2.0.sql \
 		plprofiler--2.0--3.0.sql \
 		plprofiler--3.0--3.5.sql \
 		plprofiler--3.5--4.0.sql \
-		plprofiler--4.0.sql
+		plprofiler--4.0--4.1.sql \
+		plprofiler--4.1.sql
 
 ifdef USE_PGXS
 PG_CONFIG = pg_config

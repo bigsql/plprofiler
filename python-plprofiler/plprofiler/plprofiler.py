@@ -26,6 +26,12 @@ class plprofiler:
         self.dbconn = psycopg2.connect(**connoptions)
         self.profiler_namespace = self.get_profiler_namespace()
 
+    def version(self):
+        return 40100
+        
+    def versionstr(self):
+        return "plprofiler version 4.1"
+
     def get_profiler_namespace(self):
         # ----
         # Find out the namespace of the plprofiler extension.

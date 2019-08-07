@@ -22,7 +22,7 @@ CREATE FUNCTION pl_profiler_version()
 RETURNS integer
 AS $$
 BEGIN
-	RETURN 40000;
+	RETURN 40100;
 END;
 $$ LANGUAGE plpgsql;
 ALTER FUNCTION pl_profiler_version() OWNER TO plprofiler;
