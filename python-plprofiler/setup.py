@@ -6,7 +6,7 @@ setup(
     version = '4.1',
     author = 'Jan Wieck',
     author_email = 'jan@wi3ck.info',
-    url = 'https://bitbucket.org/openscg/plprofiler/overview',
+    url = 'https://github.com/bigsql/plprofiler',
     license = 'Artistic License and CDDL',
     packages = ['plprofiler', ],
     package_data = {
