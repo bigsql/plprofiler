@@ -12,3 +12,13 @@ $$ LANGUAGE plpgsql;
 ALTER FUNCTION pl_profiler_version() OWNER TO plprofiler;
 GRANT EXECUTE ON FUNCTION pl_profiler_version() TO public;
 
+CREATE OR REPLACE FUNCTION pl_profiler_versionstr()
+RETURNS text
+AS $$
+BEGIN
+	RETURN '4.1';
+END;
+$$ LANGUAGE plpgsql;
+ALTER FUNCTION pl_profiler_versionstr() OWNER TO plprofiler;
+GRANT EXECUTE ON FUNCTION pl_profiler_versionstr() TO public;
+

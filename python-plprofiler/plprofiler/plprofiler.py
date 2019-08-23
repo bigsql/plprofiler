@@ -30,7 +30,7 @@ class plprofiler:
         return 40100
         
     def versionstr(self):
-        return "plprofiler version 4.1"
+        return "4.1"
 
     def get_profiler_namespace(self):
         # ----
@@ -52,6 +52,21 @@ class plprofiler:
             raise Exception('ERROR: plprofiler extension not found in ' +
                             'database "%s"' %dbname)
         result = row[0]
+
+        # ----
+        # We also check the version of the backend extension here.
+        # ----
+        try:
+            cur.execute("""
+                    SELECT "%s".pl_profiler_version(),
+                           "%s".pl_profiler_versionstr()
+                """ %(result, result))
+        except Exception:
+            raise Exception("ERROR: cannot determine the version of the plprofiler extension - please upgrade the database extension to 4.1 or higher.")
+        vrow = cur.fetchone()
+        if vrow[0] < 40100 or vrow[0] >= 50000:
+            raise Exception("ERROR: plprofiler extension is version %s, need 4.x" %vrow[1])
+
         cur.close()
         self.dbconn.rollback()
         return result
