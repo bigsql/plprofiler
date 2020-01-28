@@ -1,5 +1,4 @@
-PL Profiler Extension
-=====================
+# plProfiler
 
 The **plprofiler** is an extension for the PostgreSQL database system to create performance profiles of PL/pgSQL functions and stored procedures. The included external Python class and command line utility can be used to easily control the extension, run arbitrary SQL commands (invoking PL/pgSQL functions), save and manage the resulting performance datasets and create HTML reports from them.
 
