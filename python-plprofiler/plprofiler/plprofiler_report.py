@@ -1,7 +1,6 @@
 #!/usr/bin/env python
 
 import base64
-import cgi
 import html
 import os
 import subprocess
@@ -20,7 +19,7 @@ class plprofiler_report:
         self.out("<html>")
         self.out("<head>")
         self.out("""  <meta charset="UTF-8"> """)
-        self.out("  <title>%s</title>" %(cgi.escape(config['title']), ))
+        self.out("  <title>%s</title>" %(html.escape(config['title']), ))
         self.out(HTML_SCRIPT)
         self.out(HTML_STYLE)
         self.out("</head>")
