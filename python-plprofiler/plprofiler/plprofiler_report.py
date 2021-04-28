@@ -2,6 +2,7 @@
 
 import base64
 import cgi
+import html
 import os
 import subprocess
 import sys
@@ -18,7 +19,7 @@ class plprofiler_report:
 
         self.out("<html>")
         self.out("<head>")
-        self.out("  <title>%s</title>" %(cgi.escape(config['title']), ))
+        self.out("  <title>%s</title>" %(html.escape(config['title']), ))
         self.out(HTML_SCRIPT)
         self.out(HTML_STYLE)
         self.out("</head>")
@@ -106,7 +107,7 @@ class plprofiler_report:
             if line['line_number'] == 0:
                 src = "<b>--&nbsp;Function&nbsp;Totals</b>"
             else:
-                src = cgi.escape(line['source'].expandtabs(int(config['tabstop']))).replace(" ", "&nbsp;")
+                src = html.escape(line['source'].expandtabs(int(config['tabstop']))).replace(" ", "&nbsp;")
             self.out("""  <tr>""")
             self.out("""    <td align="right"><code>{val}</code></td>""".format(val = line['line_number']))
             self.out("""    <td align="right">{val}</td>""".format(val = line['exec_count']))
