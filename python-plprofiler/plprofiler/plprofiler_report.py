@@ -1,7 +1,6 @@
 #!/usr/bin/env python
 
 import base64
-import cgi
 import html
 import os
 import subprocess
