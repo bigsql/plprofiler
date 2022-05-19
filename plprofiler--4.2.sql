@@ -22,7 +22,7 @@ CREATE OR REPLACE FUNCTION pl_profiler_version()
 RETURNS integer
 AS $$
 BEGIN
-	RETURN 40100;
+	RETURN 40200;
 END;
 $$ LANGUAGE plpgsql;
 ALTER FUNCTION pl_profiler_version() OWNER TO plprofiler;
@@ -32,7 +32,7 @@ CREATE OR REPLACE FUNCTION pl_profiler_versionstr()
 RETURNS text
 AS $$
 BEGIN
-	RETURN '4.1';
+	RETURN '4.2';
 END;
 $$ LANGUAGE plpgsql;
 ALTER FUNCTION pl_profiler_versionstr() OWNER TO plprofiler;
