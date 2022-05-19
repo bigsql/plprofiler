@@ -24,7 +24,7 @@ AS $$
 BEGIN
 	RETURN 40200;
 END;
-$$ LANGUAGE plpgsql;
+$$ STRICT LANGUAGE plpgsql;
 ALTER FUNCTION pl_profiler_version() OWNER TO plprofiler;
 GRANT EXECUTE ON FUNCTION pl_profiler_version() TO public;
 
@@ -34,7 +34,7 @@ AS $$
 BEGIN
 	RETURN '4.2';
 END;
-$$ LANGUAGE plpgsql;
+$$ STRICT LANGUAGE plpgsql;
 ALTER FUNCTION pl_profiler_versionstr() OWNER TO plprofiler;
 GRANT EXECUTE ON FUNCTION pl_profiler_versionstr() TO public;
 
@@ -47,7 +47,7 @@ CREATE FUNCTION pl_profiler_linestats_local(
 )
 RETURNS SETOF record
 AS 'MODULE_PATHNAME'
-LANGUAGE C ROWS 1000000;
+STRICT LANGUAGE C ROWS 1000000;
 ALTER FUNCTION pl_profiler_linestats_local() OWNER TO plprofiler;
 GRANT EXECUTE ON FUNCTION pl_profiler_linestats_local() TO public;
 
@@ -60,7 +60,7 @@ CREATE FUNCTION pl_profiler_linestats_shared(
 )
 RETURNS SETOF record
 AS 'MODULE_PATHNAME'
-LANGUAGE C ROWS 1000000;
+STRICT LANGUAGE C ROWS 1000000;
 ALTER FUNCTION pl_profiler_linestats_shared() OWNER TO plprofiler;
 
 CREATE FUNCTION pl_profiler_callgraph_local(
@@ -72,7 +72,7 @@ CREATE FUNCTION pl_profiler_callgraph_local(
 )
 RETURNS SETOF record
 AS 'MODULE_PATHNAME'
-LANGUAGE C ROWS 1000000;
+STRICT LANGUAGE C ROWS 1000000;
 ALTER FUNCTION pl_profiler_callgraph_local() OWNER TO plprofiler;
 GRANT EXECUTE ON FUNCTION pl_profiler_callgraph_local() TO public;
 
@@ -85,20 +85,20 @@ CREATE FUNCTION pl_profiler_callgraph_shared(
 )
 RETURNS SETOF record
 AS 'MODULE_PATHNAME'
-LANGUAGE C ROWS 1000000;
+STRICT LANGUAGE C ROWS 1000000;
 ALTER FUNCTION pl_profiler_callgraph_shared() OWNER TO plprofiler;
 
 CREATE FUNCTION pl_profiler_func_oids_local()
 RETURNS oid[]
 AS 'MODULE_PATHNAME'
-LANGUAGE C;
+STRICT LANGUAGE C;
 ALTER FUNCTION pl_profiler_func_oids_local() OWNER TO plprofiler;
 GRANT EXECUTE ON FUNCTION pl_profiler_func_oids_local() TO public;
 
 CREATE FUNCTION pl_profiler_func_oids_shared()
 RETURNS oid[]
 AS 'MODULE_PATHNAME'
-LANGUAGE C;
+STRICT LANGUAGE C;
 ALTER FUNCTION pl_profiler_func_oids_shared() OWNER TO plprofiler;
 
 CREATE FUNCTION pl_profiler_funcs_source(
@@ -109,105 +109,105 @@ CREATE FUNCTION pl_profiler_funcs_source(
 )
 RETURNS SETOF record
 AS 'MODULE_PATHNAME'
-LANGUAGE C ROWS 1000000;
+STRICT LANGUAGE C ROWS 1000000;
 ALTER FUNCTION pl_profiler_funcs_source(oid[]) OWNER TO plprofiler;
 GRANT EXECUTE ON FUNCTION pl_profiler_funcs_source(oid[]) TO public;
 
 CREATE FUNCTION pl_profiler_get_stack(stack oid[])
 RETURNS text[]
 AS 'MODULE_PATHNAME'
-LANGUAGE C;
+STRICT LANGUAGE C;
 ALTER FUNCTION pl_profiler_get_stack(oid[]) OWNER TO plprofiler;
 GRANT EXECUTE ON FUNCTION pl_profiler_get_stack(oid[]) TO public;
 
 CREATE FUNCTION pl_profiler_reset_local()
 RETURNS void
 AS 'MODULE_PATHNAME'
-LANGUAGE C;
+STRICT LANGUAGE C;
 ALTER FUNCTION pl_profiler_reset_local() OWNER TO plprofiler;
 GRANT EXECUTE ON FUNCTION pl_profiler_reset_local() TO public;
 
 CREATE FUNCTION pl_profiler_reset_shared()
 RETURNS void
 AS 'MODULE_PATHNAME'
-LANGUAGE C;
+STRICT LANGUAGE C;
 ALTER FUNCTION pl_profiler_reset_shared() OWNER TO plprofiler;
 
 CREATE FUNCTION pl_profiler_set_enabled_global(enabled bool)
 RETURNS bool
 AS 'MODULE_PATHNAME'
-LANGUAGE C;
+STRICT LANGUAGE C;
 ALTER FUNCTION pl_profiler_set_enabled_global(bool) OWNER TO plprofiler;
 
 CREATE FUNCTION pl_profiler_get_enabled_global()
 RETURNS bool
 AS 'MODULE_PATHNAME'
-LANGUAGE C;
+STRICT LANGUAGE C;
 ALTER FUNCTION pl_profiler_get_enabled_global() OWNER TO plprofiler;
 GRANT EXECUTE ON FUNCTION pl_profiler_get_enabled_global() TO public;
 
 CREATE FUNCTION pl_profiler_set_enabled_local(enabled bool)
 RETURNS bool
 AS 'MODULE_PATHNAME'
-LANGUAGE C;
+STRICT LANGUAGE C;
 ALTER FUNCTION pl_profiler_set_enabled_local(bool) OWNER TO plprofiler;
 GRANT EXECUTE ON FUNCTION pl_profiler_set_enabled_local(bool) TO public;
 
 CREATE FUNCTION pl_profiler_get_enabled_local()
 RETURNS bool
 AS 'MODULE_PATHNAME'
-LANGUAGE C;
+STRICT LANGUAGE C;
 ALTER FUNCTION pl_profiler_get_enabled_local() OWNER TO plprofiler;
 GRANT EXECUTE ON FUNCTION pl_profiler_get_enabled_local() TO public;
 
 CREATE FUNCTION pl_profiler_set_enabled_pid(pid int4)
 RETURNS bool
 AS 'MODULE_PATHNAME'
-LANGUAGE C;
+STRICT LANGUAGE C;
 ALTER FUNCTION pl_profiler_set_enabled_pid(int4) OWNER TO plprofiler;
 
 CREATE FUNCTION pl_profiler_get_enabled_pid()
 RETURNS bool
 AS 'MODULE_PATHNAME'
-LANGUAGE C;
+STRICT LANGUAGE C;
 ALTER FUNCTION pl_profiler_get_enabled_pid() OWNER TO plprofiler;
 GRANT EXECUTE ON FUNCTION pl_profiler_get_enabled_pid() TO public;
 
 CREATE FUNCTION pl_profiler_set_collect_interval(seconds int4)
 RETURNS bool
 AS 'MODULE_PATHNAME'
-LANGUAGE C;
+STRICT LANGUAGE C;
 ALTER FUNCTION pl_profiler_set_collect_interval(int4) OWNER TO plprofiler;
 
 CREATE FUNCTION pl_profiler_get_collect_interval()
 RETURNS bool
 AS 'MODULE_PATHNAME'
-LANGUAGE C;
+STRICT LANGUAGE C;
 ALTER FUNCTION pl_profiler_get_collect_interval() OWNER TO plprofiler;
 GRANT EXECUTE ON FUNCTION pl_profiler_get_collect_interval() TO public;
 
 CREATE FUNCTION pl_profiler_collect_data()
 RETURNS int4
 AS 'MODULE_PATHNAME'
-LANGUAGE C;
+STRICT LANGUAGE C;
 ALTER FUNCTION pl_profiler_collect_data() OWNER TO plprofiler;
 
 CREATE FUNCTION pl_profiler_callgraph_overflow()
 RETURNS bool
 AS 'MODULE_PATHNAME'
-LANGUAGE C;
+STRICT LANGUAGE C;
 ALTER FUNCTION pl_profiler_callgraph_overflow() OWNER TO plprofiler;
 
 CREATE FUNCTION pl_profiler_functions_overflow()
 RETURNS bool
 AS 'MODULE_PATHNAME'
-LANGUAGE C;
+STRICT LANGUAGE C;
 ALTER FUNCTION pl_profiler_functions_overflow() OWNER TO plprofiler;
 
 CREATE FUNCTION pl_profiler_lines_overflow()
 RETURNS bool
 AS 'MODULE_PATHNAME'
-LANGUAGE C;
+STRICT LANGUAGE C;
 ALTER FUNCTION pl_profiler_lines_overflow() OWNER TO plprofiler;
 
 CREATE TABLE pl_profiler_saved (
