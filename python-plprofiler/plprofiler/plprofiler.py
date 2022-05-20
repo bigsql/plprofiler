@@ -458,7 +458,7 @@ class plprofiler:
                                 FROM pl_profiler_callgraph_local()
                                 GROUP BY func_oid)
                         SELECT P.oid, N.nspname, P.proname,
-                            pg_catalog.pg_get_function_result(P.oid),
+                            coalesce(pg_catalog.pg_get_function_result(P.oid), ''),
                             pg_catalog.pg_get_function_arguments(P.oid),
                             coalesce(SELF.us_self, 0) as self_time
                             FROM pg_catalog.pg_proc P
@@ -631,7 +631,7 @@ class plprofiler:
                                 FROM pl_profiler_callgraph_shared()
                                 GROUP BY func_oid)
                         SELECT P.oid, N.nspname, P.proname,
-                            pg_catalog.pg_get_function_result(P.oid),
+                            coalesce(pg_catalog.pg_get_function_result(P.oid), ''),
                             pg_catalog.pg_get_function_arguments(P.oid),
                             coalesce(SELF.us_self, 0) as self_time
                             FROM pg_catalog.pg_proc P
