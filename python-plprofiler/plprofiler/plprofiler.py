@@ -27,10 +27,10 @@ class plprofiler:
         self.profiler_namespace = self.get_profiler_namespace()
 
     def version(self):
-        return 40100
+        return 40200
         
     def versionstr(self):
-        return "4.1"
+        return "4.2"
 
     def get_profiler_namespace(self):
         # ----

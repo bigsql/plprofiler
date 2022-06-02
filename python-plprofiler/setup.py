@@ -3,7 +3,7 @@ from setuptools import setup
 setup(
     name = 'plprofiler',
     description = 'PL/pgSQL Profiler module and command line tool',
-    version = '4.1',
+    version = '4.2',
     author = 'Jan Wieck',
     author_email = 'jan@wi3ck.info',
     url = 'https://github.com/bigsql/plprofiler',
