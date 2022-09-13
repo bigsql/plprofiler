@@ -2,3 +2,4 @@
 *.so
 .*.swp
 *.pyc
+*.bc
