@@ -39,6 +39,9 @@ static void profiler_stmt_end(PLpgSQL_execstate *estate, PLpgSQL_stmt *stmt);
  **********************************************************************/
 static Size profiler_shmem_size(void);
 static void profiler_shmem_startup(void);
+#if PG_VERSION_NUM >= 150000
+static void profiler_shmem_request(void);
+#endif
 static void init_hash_tables(void);
 static char *find_source(Oid oid, HeapTuple *tup, char **funcName);
 static int count_source_lines(const char *src);
@@ -83,6 +86,9 @@ static bool				have_new_local_data = false;
 static PLpgSQL_plugin  *prev_plpgsql_plugin = NULL;
 static PLpgSQL_plugin  *prev_pltsql_plugin = NULL;
 static shmem_startup_hook_type	prev_shmem_startup_hook = NULL;
+#if PG_VERSION_NUM >= 150000
+static shmem_request_hook_type	prev_shmem_request_hook = NULL;
+#endif
 
 static PLpgSQL_plugin	plugin_funcs = {
 		profiler_func_init,
@@ -125,6 +131,10 @@ _PG_init(void)
 		 */
 		prev_shmem_startup_hook = shmem_startup_hook;
 		shmem_startup_hook = profiler_shmem_startup;
+		#if PG_VERSION_NUM >= 150000
+		prev_shmem_request_hook = shmem_request_hook;
+		shmem_request_hook = profiler_shmem_request;
+		#endif
 
 		RegisterXactCallback(profiler_xact_callback, NULL);
 
@@ -180,11 +190,13 @@ _PG_init(void)
 								NULL);
 
 		/* Request the additionl shared memory and LWLock needed. */
+		#if PG_VERSION_NUM < 150000
 		RequestAddinShmemSpace(profiler_shmem_size());
 		#if PG_VERSION_NUM >= 90600
 		RequestNamedLWLockTranche("plprofiler", 1);
 		#else
 		RequestAddinLWLocks(1);
+		#endif
 		#endif
 	}
 }
@@ -615,6 +627,15 @@ init_hash_tables(void)
 				 &hash_ctl,
 				 HASH_ELEM | HASH_FUNCTION | HASH_COMPARE);
 }
+
+#if PG_VERSION_NUM >= 150000
+static void
+profiler_shmem_request(void)
+{
+	RequestAddinShmemSpace(profiler_shmem_size());
+	RequestNamedLWLockTranche("plprofiler", 1);
+}
+#endif
 
 static void
 profiler_shmem_startup(void)
