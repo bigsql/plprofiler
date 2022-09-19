@@ -15,9 +15,21 @@ pip3 install --user plprofiler
 Building PL Profiler from Source
 ================================
 
-The backend part of the **plprofiler** is a PostgreSQL extension, that compiles with USE_PGXS in the `Makefile`. This means that it can be compiled and installed when checked out into the `contrib` directory of the PostgreSQL source tree.
+The backend part of the **plprofiler** is a PostgreSQL extension, that compiles with USE_PGXS in the `Makefile`. This means that it can be compiled and installed when checked out into the `contrib` directory of the PostgreSQL source tree. If PostgreSQL itself was installed from binary packages like RPMs, this may require sudo privileges since the PostgreSQL library and shared directories may be owned by `root`.
 
-The **plprofiler** command line utility is a Python module with a main() entry point. It is found in the `plprofiler/python-plprofiler` directory. If you are using Python virtualenv, just run `python ./setup.py install` in that directory. If you do not use virtualenv, the utility needs to be installed in the system wide Python site packages by root:
+```
+cd contrib/plprofiler
+make install
+```
+
+or if checked out outside of the contrib directory
+
+```
+cd plprofiler
+USE_PGXS=1 make install
+```
+
+The **plprofiler** command line utility is a Python module with a main() entry point. It is found in the `plprofiler/python-plprofiler` directory. If you are using Python virtualenv (recommended), just run `python ./setup.py install` in that directory. If you do not use virtualenv, the utility needs to be installed in the system wide Python site packages by root:
 
 ```
 cd python-plprofiler
