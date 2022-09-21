@@ -1,7 +1,7 @@
 from setuptools import setup
 
 setup(
-    name = 'plprofiler',
+    name = 'plprofiler-client',
     description = 'PL/pgSQL Profiler module and command line tool',
     version = '4.2',
     author = 'Jan Wieck',
