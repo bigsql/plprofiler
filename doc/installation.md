@@ -1,38 +1,75 @@
 Installing PL Profiler
 ======================
-The backend part of **plprofiler** is a PostgreSQL extension that must be installed along with your Postgres distribution.  In the OSCG.IO distribuition this is done via the command:
+
+The **plprofiler** consists of two parts.
+* A backend side, which is provided by a PostgreSQL extension and
+* a client part, which is a Python package with a command line wrapper.
+
+Installing PL Profiler via the OSCG.IO distribution
+---------------------------------------------------
+
+In the OSCG.IO distribuition both parts of the **plprofiler** are installed with the command
 
 ```
 ./io install plprofiler-pg14
 ```
 
-The front part of **plprofiler** is a Python application that should be installed in your development environment via the command:
+Installing PL Profiler via PGDG RPMs
+------------------------------------
+
+**(Note: as of this writing the RPMs have not yet been added to the PGDG repository)**
+
+If you installed PostgreSQL via the [PGDG yum repository](https://yum.postgresql.org/) it is highly recommended to install the **plprofiler** from the same. There are two packages and a meta-package pulling in both:
+* `plprofiler-server` - the backend PostgreSQL extension
+* `plprofiler-client` - the Python package with commandline wrapper
+* `plprofiler` - the meta-package installing both
+
+On a PostgreSQL server you would normally install via the meta-package. The separate `plprofiler-server` package is provided for installations where one intentionally does not provide debugging or testing utilities.
+
+The **plprofiler-client** package is intended for developer workstations that do not have the PostgreSQL server itself installed.
+
+Installing the PL Profiler client via pip
+-----------------------------------------
+
+In environments where users cannot install RPM packages, the **plprofiler-client** can be installed via Python's `pip` utility. It is recommended to use [Python Virtual Environments](https://docs.python.org/3/library/venv.html) in this case.
 
 ```
-pip3 install --user plprofiler
+cd
+virtualenv --system-site-packages plprofiler-venv
+source ~/plprofiler-venv/bin/activate
+pip install plprofiler-client psycopg2-binary
 ```
+
+The `psycopg2-binary` dependency needs to be specified manually since adding it to the `install_requires` list of setup.py would create an unsatisfied runtime dependency when installing `plprofiler-client` from RPM.
 
 Building PL Profiler from Source
-================================
+--------------------------------
 
-The backend part of the **plprofiler** is a PostgreSQL extension, that compiles with USE_PGXS in the `Makefile`. This means that it can be compiled and installed when checked out into the `contrib` directory of the PostgreSQL source tree. If PostgreSQL itself was installed from binary packages like RPMs, this may require sudo privileges since the PostgreSQL library and shared directories may be owned by `root`.
+**plprofiler** is implemented as a `PGXS` extension. This means it can be built either from within the PostgreSQL source tree, or outside of it when just the PostgreSQL devel RPM package is installed and `$PATH` includes the location of the correct `pg_config` utility.
+
+To install **plprofiler** from within a PostgreSQL source tree, the [**plprofiler** git repository](https://github.com/bigsql/plprofiler.git) needs to be cloned into the `contrib` directory. The following commands then install the backend extension:
 
 ```
 cd contrib/plprofiler
 make install
 ```
 
-or if checked out outside of the contrib directory
+If **plprofiler** was cloned outside of the contrib directory, use the following commands:
 
 ```
 cd plprofiler
 USE_PGXS=1 make install
 ```
 
-The **plprofiler** command line utility is a Python module with a main() entry point. It is found in the `plprofiler/python-plprofiler` directory. If you are using Python virtualenv (recommended), just run `python ./setup.py install` in that directory. If you do not use virtualenv, the utility needs to be installed in the system wide Python site packages by root:
+The **plprofiler-client** part in both cases is then installed via `setup.py`. It is recommended to use a [Python Virtual Environments](https://docs.python.org/3/library/venv.html) for this.
 
 ```
 cd python-plprofiler
-sudo python ./setup.py install
+python ./setup.py install
 ```
-The module requires the psycopg2 database connector. Run whatever is require on your system to install the python-psycopg2 RPM (yum, apt-get, pip, ?").
+
+The client requires the psycopg2 database connector. Since the **plprofiler** client was installed via `pip` in this case, it is recommended to run
+
+```
+pip install psycopg2-binary
+```
