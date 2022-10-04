@@ -4,7 +4,7 @@
  *
  *	  Declarations for profiling plugin for PL/pgSQL instrumentation
  *
- * Copyright (c) 2014-2019, BigSQL
+ * Copyright (c) 2014-2022, OSCG-Partners
  * Copyright (c) 2008-2014, PostgreSQL Global Development Group
  * Copyright 2006,2007 - EnterpriseDB, Inc.
  *
