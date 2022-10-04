@@ -26,7 +26,6 @@ the main project.""",
         ],
     },
     install_requires = [
-        'psycopg2-binary',
         'configparser',
     ],
     entry_points = {
