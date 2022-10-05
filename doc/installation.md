@@ -24,7 +24,7 @@ If you installed PostgreSQL via the [PGDG yum repository](https://yum.postgresql
 * `postgresqlXX-plprofiler-client` - the Python package with commandline wrapper
 * `postgresqlXX-plprofiler` - the meta-package installing both
 
-On a PostgreSQL server you would normally install via the meta-package. The separate `plprofiler-server` package is provided for installations where one intentionally does not provide debugging or testing utilities.
+On a PostgreSQL server you would normally install via the meta-package. The separate `postgresqlXX-plprofiler-server` package is provided for installations where one intentionally does not provide debugging or testing utilities.
 
 The **postgresqlXX-plprofiler-client** package is intended for developer workstations that do not have the PostgreSQL server itself installed.
 
