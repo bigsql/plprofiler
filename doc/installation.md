@@ -26,12 +26,12 @@ If you installed PostgreSQL via the [PGDG yum repository](https://yum.postgresql
 
 On a PostgreSQL server you would normally install via the meta-package. The separate `postgresqlXX-plprofiler-server` package is provided for installations where one intentionally does not provide debugging or testing utilities.
 
-The **postgresqlXX-plprofiler-client** package is intended for developer workstations that do not have the PostgreSQL server itself installed.
+The `postgresqlXX-plprofiler-client` package is intended for developer workstations that do not have the PostgreSQL server itself installed.
 
 Installing the PL Profiler client via pip
 -----------------------------------------
 
-In environments where users cannot install RPM packages, the **plprofiler-client** can be installed via Python's `pip` utility. It is recommended to use [Python Virtual Environments](https://docs.python.org/3/library/venv.html) in this case.
+In environments where users cannot install RPM packages, the `plprofiler-client` can be installed via Python's `pip` utility. It is recommended to use [Python Virtual Environments](https://docs.python.org/3/library/venv.html) in this case.
 
 ```
 cd
@@ -61,7 +61,7 @@ cd plprofiler
 USE_PGXS=1 make install
 ```
 
-The **plprofiler-client** part in both cases is then installed via `setup.py`. It is recommended to use a [Python Virtual Environments](https://docs.python.org/3/library/venv.html) for this.
+The `plprofiler-client` part in both cases is then installed via `setup.py`. It is recommended to use a [Python Virtual Environments](https://docs.python.org/3/library/venv.html) for this.
 
 ```
 cd python-plprofiler
