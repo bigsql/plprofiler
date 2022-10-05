@@ -20,13 +20,13 @@ Installing PL Profiler via PGDG RPMs
 **(Note: as of this writing the RPMs have not yet been added to the PGDG repository)**
 
 If you installed PostgreSQL via the [PGDG yum repository](https://yum.postgresql.org/) it is highly recommended to install the **plprofiler** from the same. There are two packages and a meta-package pulling in both:
-* `plprofiler-server` - the backend PostgreSQL extension
-* `plprofiler-client` - the Python package with commandline wrapper
-* `plprofiler` - the meta-package installing both
+* `postgresqlXX-plprofiler-server` - the backend PostgreSQL extension
+* `postgresqlXX-plprofiler-client` - the Python package with commandline wrapper
+* `postgresqlXX-plprofiler` - the meta-package installing both
 
 On a PostgreSQL server you would normally install via the meta-package. The separate `plprofiler-server` package is provided for installations where one intentionally does not provide debugging or testing utilities.
 
-The **plprofiler-client** package is intended for developer workstations that do not have the PostgreSQL server itself installed.
+The **postgresqlXX-plprofiler-client** package is intended for developer workstations that do not have the PostgreSQL server itself installed.
 
 Installing the PL Profiler client via pip
 -----------------------------------------
