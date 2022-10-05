@@ -8,7 +8,7 @@ The **plprofiler** consists of two parts.
 Installing PL Profiler via the OSCG.IO distribution
 ---------------------------------------------------
 
-In the OSCG.IO distribuition both parts of the **plprofiler** are installed with the command
+In the [OSCG.IO](https://oscg.io/) distribuition both parts of the **plprofiler** are installed with the command
 
 ```
 ./io install plprofiler-pg14
