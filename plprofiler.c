@@ -1302,7 +1302,7 @@ pl_profiler_linestats_local(PG_FUNCTION_ARGS)
 		hash_seq_init(&hash_seq, functions_hash);
 		while ((entry = hash_seq_search(&hash_seq)) != NULL)
 		{
-			int		lno;
+			int64	lno;
 
 			for (lno = 0; lno < entry->line_count; lno++)
 			{
@@ -1330,7 +1330,7 @@ pl_profiler_linestats_local(PG_FUNCTION_ARGS)
 	/* clean up and return the tuplestore */
 	tuplestore_donestoring(tupstore);
 
-	return (Datum)0;
+	PG_RETURN_VOID();
 }
 
 /* -------------------------------------------------------------------
@@ -1388,7 +1388,7 @@ pl_profiler_linestats_shared(PG_FUNCTION_ARGS)
 	hash_seq_init(&hash_seq, functions_shared);
 	while ((entry = hash_seq_search(&hash_seq)) != NULL)
 	{
-		int		lno;
+		int64	lno;
 
 		if (entry->key.db_oid != MyDatabaseId)
 			continue;
@@ -1427,7 +1427,7 @@ pl_profiler_linestats_shared(PG_FUNCTION_ARGS)
 	/* clean up and return the tuplestore */
 	tuplestore_donestoring(tupstore);
 
-	return (Datum)0;
+	PG_RETURN_VOID();
 }
 
 /* -------------------------------------------------------------------
@@ -1509,7 +1509,7 @@ pl_profiler_callgraph_local(PG_FUNCTION_ARGS)
 	/* clean up and return the tuplestore */
 	tuplestore_donestoring(tupstore);
 
-	return (Datum)0;
+	PG_RETURN_VOID();
 }
 
 /* -------------------------------------------------------------------
@@ -1610,7 +1610,7 @@ pl_profiler_callgraph_shared(PG_FUNCTION_ARGS)
 	/* clean up and return the tuplestore */
 	tuplestore_donestoring(tupstore);
 
-	return (Datum)0;
+	PG_RETURN_VOID();
 }
 
 /* -------------------------------------------------------------------
@@ -1792,18 +1792,20 @@ pl_profiler_funcs_source(PG_FUNCTION_ARGS)
 		int			i = 0;
 		char	   *cp;
 		char	   *linestart;
-		int64		line_number = 1;
+		int64		line_number = 0;
 
 		/* Create the line-0 entry. */
 		MemSet(values, 0, sizeof(values));
 		MemSet(nulls, 0, sizeof(nulls));
 
 		values[i++] = func_oids[fidx];
-		values[i++] = (Datum)0;
+		values[i++] = Int64GetDatumFast(line_number);
 		values[i++] = PointerGetDatum(cstring_to_text("-- Line 0"));
 
 		Assert(i == PL_FUNCS_SRC_COLS);
 		tuplestore_putvalues(tupstore, tupdesc, values, nulls);
+
+		line_number++;
 
 		/* Find the source code and split it. */
 		procSrc = find_source(func_oids[fidx], &procTuple, &funcName);
@@ -1826,13 +1828,14 @@ pl_profiler_funcs_source(PG_FUNCTION_ARGS)
 				*cp++ = '\0';
 			i = 0;
 			values[i++] = func_oids[fidx];
-			values[i++] = Int64GetDatumFast(line_number++);
+			values[i++] = Int64GetDatumFast(line_number);
 			values[i++] = PointerGetDatum(cstring_to_text(linestart));
 
 			Assert(i == PL_FUNCS_SRC_COLS);
 			tuplestore_putvalues(tupstore, tupdesc, values, nulls);
 
 			linestart = cp;
+			line_number++;
 		}
 
 		ReleaseSysCache(procTuple);
@@ -1842,7 +1845,7 @@ pl_profiler_funcs_source(PG_FUNCTION_ARGS)
 	/* clean up and return the tuplestore */
 	tuplestore_donestoring(tupstore);
 
-	return (Datum)0;
+	PG_RETURN_VOID();
 }
 
 /* -------------------------------------------------------------------
