@@ -632,6 +632,9 @@ init_hash_tables(void)
 static void
 profiler_shmem_request(void)
 {
+	if (prev_shmem_request_hook)
+		prev_shmem_request_hook();
+
 	RequestAddinShmemSpace(profiler_shmem_size());
 	RequestNamedLWLockTranche("plprofiler", 1);
 }
