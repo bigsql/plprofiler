@@ -1251,9 +1251,9 @@ pl_profiler_get_stack(PG_FUNCTION_ARGS)
 	}
 
 	/* Return the texts as a text[]. */
-	PG_RETURN_ARRAYTYPE_P(PointerGetDatum(construct_array(funcdefs, nelems,
-														  TEXTOID, -1,
-														  false, 'i')));
+	PG_RETURN_ARRAYTYPE_P(construct_array(funcdefs, nelems,
+										  TEXTOID, -1,
+										  false, 'i'));
 }
 
 /* -------------------------------------------------------------------
@@ -1499,9 +1499,9 @@ pl_profiler_callgraph_local(PG_FUNCTION_ARGS)
 														  OIDOID, sizeof(Oid),
 														  true, 'i'));
 			values[j++] = Int64GetDatumFast(entry->callCount);
-			values[j++] = Int64GetDatumFast(entry->totalTime);
-			values[j++] = Int64GetDatumFast(entry->childTime);
-			values[j++] = Int64GetDatumFast(entry->selfTime);
+			values[j++] = UInt64GetDatum(entry->totalTime);
+			values[j++] = UInt64GetDatum(entry->childTime);
+			values[j++] = UInt64GetDatum(entry->selfTime);
 
 			Assert(j == PL_CALLGRAPH_COLS);
 
@@ -1595,9 +1595,9 @@ pl_profiler_callgraph_shared(PG_FUNCTION_ARGS)
 		SpinLockAcquire(&(entry->mutex));
 
 		values[j++] = Int64GetDatumFast(entry->callCount);
-		values[j++] = Int64GetDatumFast(entry->totalTime);
-		values[j++] = Int64GetDatumFast(entry->childTime);
-		values[j++] = Int64GetDatumFast(entry->selfTime);
+		values[j++] = UInt64GetDatum(entry->totalTime);
+		values[j++] = UInt64GetDatum(entry->childTime);
+		values[j++] = UInt64GetDatum(entry->selfTime);
 
 		/* Done with the counter access. */
 		SpinLockRelease(&(entry->mutex));
@@ -1662,9 +1662,9 @@ pl_profiler_func_oids_local(PG_FUNCTION_ARGS)
 	}
 
 	/* Build and return the actual array. */
-	PG_RETURN_ARRAYTYPE_P(PointerGetDatum(construct_array(result, i,
-														  OIDOID, sizeof(Oid),
-														  true, 'i')));
+	PG_RETURN_ARRAYTYPE_P(construct_array(result, i,
+										  OIDOID, sizeof(Oid),
+										  true, 'i'));
 }
 
 /* -------------------------------------------------------------------
@@ -1724,9 +1724,9 @@ pl_profiler_func_oids_shared(PG_FUNCTION_ARGS)
 	LWLockRelease(plpss->lock);
 
 	/* Build and return the actual array. */
-	PG_RETURN_ARRAYTYPE_P(PointerGetDatum(construct_array(result, i,
-														  OIDOID, sizeof(Oid),
-														  true, 'i')));
+	PG_RETURN_ARRAYTYPE_P(construct_array(result, i,
+										  OIDOID, sizeof(Oid),
+										  true, 'i'));
 }
 
 /* -------------------------------------------------------------------
