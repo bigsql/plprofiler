@@ -26,11 +26,7 @@
 #include <sys/time.h>
 #include "access/hash.h"
 #include "access/htup.h"
-
-#if PG_VERSION_NUM >= 90300
 #include "access/htup_details.h"
-#endif
-
 #include "access/sysattr.h"
 #include "catalog/indexing.h"
 #include "catalog/namespace.h"
