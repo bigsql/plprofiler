@@ -1321,9 +1321,6 @@ pl_profiler_linestats_local(PG_FUNCTION_ARGS)
 		}
 	}
 
-	/* clean up and return the tuplestore */
-	tuplestore_donestoring(tupstore);
-
 	PG_RETURN_VOID();
 }
 
@@ -1418,9 +1415,6 @@ pl_profiler_linestats_shared(PG_FUNCTION_ARGS)
 	/* Release the shared lock on the shared memory data. */
 	LWLockRelease(plpss->lock);
 
-	/* clean up and return the tuplestore */
-	tuplestore_donestoring(tupstore);
-
 	PG_RETURN_VOID();
 }
 
@@ -1499,9 +1493,6 @@ pl_profiler_callgraph_local(PG_FUNCTION_ARGS)
 			tuplestore_putvalues(tupstore, tupdesc, values, nulls);
 		}
 	}
-
-	/* clean up and return the tuplestore */
-	tuplestore_donestoring(tupstore);
 
 	PG_RETURN_VOID();
 }
@@ -1600,9 +1591,6 @@ pl_profiler_callgraph_shared(PG_FUNCTION_ARGS)
 
 	/* Release the shared lock on the shared memory data. */
 	LWLockRelease(plpss->lock);
-
-	/* clean up and return the tuplestore */
-	tuplestore_donestoring(tupstore);
 
 	PG_RETURN_VOID();
 }
@@ -1835,9 +1823,6 @@ pl_profiler_funcs_source(PG_FUNCTION_ARGS)
 		ReleaseSysCache(procTuple);
 		pfree(procSrc);
 	}
-
-	/* clean up and return the tuplestore */
-	tuplestore_donestoring(tupstore);
 
 	PG_RETURN_VOID();
 }
