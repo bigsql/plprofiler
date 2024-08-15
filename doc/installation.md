@@ -5,19 +5,17 @@ The **plprofiler** consists of two parts.
 * A backend side, which is provided by a PostgreSQL extension and
 * a client part, which is a Python package with a command line wrapper.
 
-Installing PL Profiler via the OSCG.IO distribution
----------------------------------------------------
+Installing PL Profiler via the PGEDGE distribution
+--------------------------------------------------
 
-In the [OSCG.IO](https://oscg.io/) distribuition both parts of the **plprofiler** are installed with the command
+In the [PGEDGE](https://github.com/pgedge/pgedge/) distribution both parts of the **plprofiler** are installed with the command
 
 ```
-./io install plprofiler-pg14
+./pgedge install plprofiler-pg14
 ```
 
 Installing PL Profiler via PGDG RPMs
 ------------------------------------
-
-**(Note: as of this writing the RPMs have not yet been added to the PGDG repository)**
 
 If you installed PostgreSQL via the [PGDG yum repository](https://yum.postgresql.org/) it is highly recommended to install the **plprofiler** from the same. There are two packages and a meta-package pulling in both:
 * `plprofiler_XX-server` - the backend PostgreSQL extension
@@ -37,10 +35,10 @@ In environments where users cannot install RPM packages, the `plprofiler-client`
 cd
 virtualenv --system-site-packages plprofiler-venv
 source ~/plprofiler-venv/bin/activate
-pip install plprofiler-client psycopg2-binary
+pip install plprofiler-client psycopg-binary
 ```
 
-The `psycopg2-binary` dependency needs to be specified manually since adding it to the `install_requires` list of setup.py would create an unsatisfied runtime dependency when installing `plprofiler-client` from RPM.
+The `psycopg-binary` dependency needs to be specified manually since adding it to the `install_requires` list of setup.py would create an unsatisfied runtime dependency when installing `plprofiler-client` from RPM.
 
 Building PL Profiler from Source
 --------------------------------
@@ -68,8 +66,8 @@ cd python-plprofiler
 python ./setup.py install
 ```
 
-The client requires the psycopg2 database connector. Since the **plprofiler** client was installed via `pip` in this case, it is recommended to run
+The client requires the psycopg database connector. Since the **plprofiler** client was installed via `pip` in this case, it is recommended to run
 
 ```
-pip install psycopg2-binary
+pip install psycopg-binary
 ```
