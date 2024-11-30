@@ -955,7 +955,7 @@ def edit_config_info(config):
         tmp_config.remove_section(s)
 
     tf = open(tf_name, 'r')
-    tmp_config.readfp(tf)
+    tmp_config.read_file(tf)
     tf.close()
     os.remove(tf_name)
 
