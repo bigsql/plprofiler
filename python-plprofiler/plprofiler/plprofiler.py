@@ -4,9 +4,10 @@
 #   Class handling all the profiler data.
 # ----------------------------------------------------------------------
 
-import psycopg2
+import psycopg
 import json
 import time
+from psycopg import sql
 
 from .plprofiler_report import plprofiler_report
 from .sql_split import sql_split
@@ -22,8 +23,9 @@ class plprofiler:
         # Connect to the database and get the plprofiler schema name.
         # ----
         if len(connoptions) == 0:
-            connoptions['dsn'] = ''
-        self.dbconn = psycopg2.connect(**connoptions)
+            self.dbconn = psycopg.connect()
+        else:
+            self.dbconn = psycopg.connect(**connoptions)
         self.profiler_namespace = self.get_profiler_namespace()
 
     def version(self):
@@ -77,7 +79,9 @@ class plprofiler:
         # and pl_profiler_callgraph_local into a new entry in *_saved.
         # ----
         cur = self.dbconn.cursor()
-        cur.execute("""SET search_path TO %s;""", (self.profiler_namespace, ))
+        cur.execute(
+            sql.SQL("SET search_path TO {}").format(sql.Identifier(self.profiler_namespace))
+        )
         cur.execute("""SET TRANSACTION ISOLATION LEVEL REPEATABLE READ;""")
 
         try:
@@ -89,7 +93,7 @@ class plprofiler:
                                  s_functions_overflow, s_lines_overflow)
                             VALUES (%s, %s, false, false, false)""",
                         (opt_name, json.dumps(config)))
-        except psycopg2.IntegrityError as err:
+        except psycopg.IntegrityError as err:
             self.dbconn.rollback()
             raise err
 
@@ -149,7 +153,9 @@ class plprofiler:
         # and pl_profiler_callgraph_shared into a new entry in *_saved.
         # ----
         cur = self.dbconn.cursor()
-        cur.execute("""SET search_path TO %s;""", (self.profiler_namespace, ))
+        cur.execute(
+            sql.SQL("SET search_path TO {}").format(sql.Identifier(self.profiler_namespace))
+        )
         cur.execute("""SET TRANSACTION ISOLATION LEVEL REPEATABLE READ;""")
 
         try:
@@ -163,7 +169,7 @@ class plprofiler:
                                     pl_profiler_functions_overflow(),
                                     pl_profiler_lines_overflow())""",
                         (opt_name, json.dumps(config)))
-        except psycopg2.IntegrityError as err:
+        except psycopg.IntegrityError as err:
             self.dbconn.rollback()
             raise err
 
@@ -223,7 +229,9 @@ class plprofiler:
         # This is used by the "import" command.
         # ----
         cur = self.dbconn.cursor()
-        cur.execute("""SET search_path TO %s;""", (self.profiler_namespace, ))
+        cur.execute(
+            sql.SQL("SET search_path TO {}").format(sql.Identifier(self.profiler_namespace))
+        )
         cur.execute("""SET TRANSACTION ISOLATION LEVEL REPEATABLE READ;""")
 
         config = report_data['config']
@@ -236,7 +244,6 @@ class plprofiler:
             report_data['callgraph_overflow'] = False
             report_data['functions_overflow'] = False
             report_data['lines_overflow'] = False
-
         # ----
         # Load the pl_profiler_saved entry.
         # ----
@@ -252,7 +259,7 @@ class plprofiler:
                          report_data['callgraph_overflow'],
                          report_data['functions_overflow'],
                          report_data['lines_overflow'],))
-        except psycopg2.IntegrityError as err:
+        except psycopg.IntegrityError as err:
             self.dbconn.rollback()
             raise err
 
@@ -300,7 +307,9 @@ class plprofiler:
 
     def get_dataset_list(self):
         cur = self.dbconn.cursor()
-        cur.execute("""SET search_path TO %s""", (self.profiler_namespace, ))
+        cur.execute(
+            sql.SQL("SET search_path TO {}").format(sql.Identifier(self.profiler_namespace))
+        )
         cur.execute("""SELECT s_name, s_options
                         FROM pl_profiler_saved
                         ORDER BY s_name""")
@@ -312,7 +321,9 @@ class plprofiler:
 
     def get_dataset_config(self, opt_name):
         cur = self.dbconn.cursor()
-        cur.execute("""SET search_path TO %s""", (self.profiler_namespace, ))
+        cur.execute(
+            sql.SQL("SET search_path TO {}").format(sql.Identifier(self.profiler_namespace))
+        )
         cur.execute("""SELECT s_options
                         FROM pl_profiler_saved
                         WHERE s_name = %s""", (opt_name, ))
@@ -330,7 +341,9 @@ class plprofiler:
 
     def update_dataset_config(self, opt_name, new_name, config):
         cur = self.dbconn.cursor()
-        cur.execute("""SET search_path TO %s""", (self.profiler_namespace, ))
+        cur.execute(
+            sql.SQL("SET search_path TO {}").format(sql.Identifier(self.profiler_namespace))
+        )
         cur.execute("""UPDATE pl_profiler_saved
                         SET s_name = %s,
                             s_options = %s
@@ -347,7 +360,9 @@ class plprofiler:
 
     def delete_dataset(self, opt_name):
         cur = self.dbconn.cursor()
-        cur.execute("""SET search_path TO %s""", (self.profiler_namespace, ))
+        cur.execute(
+            sql.SQL("SET search_path TO {}").format(sql.Identifier(self.profiler_namespace))
+        )
         cur.execute("""DELETE FROM pl_profiler_saved
                         WHERE s_name = %s""",
                     (opt_name, ))
@@ -362,7 +377,9 @@ class plprofiler:
 
     def get_local_report_data(self, opt_name, opt_top, func_oids):
         cur = self.dbconn.cursor()
-        cur.execute("""SET search_path TO %s""", (self.profiler_namespace, ))
+        cur.execute(
+            sql.SQL("SET search_path TO {}").format(sql.Identifier(self.profiler_namespace))
+        )
 
         # ----
         # Create a default config.
@@ -535,7 +552,9 @@ class plprofiler:
 
     def get_shared_report_data(self, opt_name, opt_top, func_oids):
         cur = self.dbconn.cursor()
-        cur.execute("""SET search_path TO %s""", (self.profiler_namespace, ))
+        cur.execute(
+            sql.SQL("SET search_path TO {}").format(sql.Identifier(self.profiler_namespace))
+        )
 
         # ----
         # Create a default config.
@@ -718,7 +737,9 @@ class plprofiler:
 
     def get_saved_report_data(self, opt_name, opt_top, func_oids):
         cur = self.dbconn.cursor()
-        cur.execute("""SET search_path TO %s""", (self.profiler_namespace, ))
+        cur.execute(
+            sql.SQL("SET search_path TO {}").format(sql.Identifier(self.profiler_namespace))
+        )
 
         # ----
         # Get the config of the saved dataset.
@@ -891,7 +912,9 @@ class plprofiler:
 
     def enable(self):
         cur = self.dbconn.cursor()
-        cur.execute("""SET search_path TO %s""", (self.profiler_namespace, ))
+        cur.execute(
+            sql.SQL("SET search_path TO {}").format(sql.Identifier(self.profiler_namespace))
+        )
         cur.execute("""SELECT pl_profiler_set_enabled_local(true)""")
         cur.execute("""SELECT pl_profiler_set_collect_interval(0)""")
         cur.execute("""RESET search_path""")
@@ -900,7 +923,9 @@ class plprofiler:
 
     def disable(self):
         cur = self.dbconn.cursor()
-        cur.execute("""SET search_path TO %s""", (self.profiler_namespace, ))
+        cur.execute(
+            sql.SQL("SET search_path TO {}").format(sql.Identifier(self.profiler_namespace))
+        )
         cur.execute("""SELECT pl_profiler_set_enabled_local(false)""")
         cur.execute("""RESET search_path""")
         self.dbconn.commit()
@@ -927,7 +952,9 @@ class plprofiler:
                             "via postgresql.conf changes and reloading " +
                             "the postmaster.") %server_version)
 
-        cur.execute("""SET search_path TO %s""", (self.profiler_namespace, ))
+        cur.execute(
+            sql.SQL("SET search_path TO {}").format(sql.Identifier(self.profiler_namespace))
+        )
         if opt_pid is not None:
             cur.execute("""SELECT pl_profiler_set_enabled_pid(%s)""", (opt_pid, ))
         else:
@@ -939,7 +966,9 @@ class plprofiler:
 
     def disable_monitor(self):
         cur = self.dbconn.cursor()
-        cur.execute("""SET search_path TO %s""", (self.profiler_namespace, ))
+        cur.execute(
+            sql.SQL("SET search_path TO {}").format(sql.Identifier(self.profiler_namespace))
+        )
         cur.execute("""SELECT pl_profiler_set_enabled_global(false)""")
         cur.execute("""SELECT pl_profiler_set_enabled_pid(0)""")
         cur.execute("""SELECT pl_profiler_set_collect_interval(0)""");
@@ -949,7 +978,9 @@ class plprofiler:
 
     def reset_local(self):
         cur = self.dbconn.cursor()
-        cur.execute("""SET search_path TO %s""", (self.profiler_namespace, ))
+        cur.execute(
+            sql.SQL("SET search_path TO {}").format(sql.Identifier(self.profiler_namespace))
+        )
         cur.execute("""SELECT pl_profiler_reset_local()""")
         cur.execute("""RESET search_path""")
         self.dbconn.commit()
@@ -957,7 +988,9 @@ class plprofiler:
 
     def reset_shared(self):
         cur = self.dbconn.cursor()
-        cur.execute("""SET search_path TO %s""", (self.profiler_namespace, ))
+        cur.execute(
+            sql.SQL("SET search_path TO {}").format(sql.Identifier(self.profiler_namespace))
+        )
         cur.execute("""SELECT pl_profiler_reset_shared()""")
         cur.execute("""RESET search_path""")
         self.dbconn.commit()
@@ -965,7 +998,9 @@ class plprofiler:
 
     def save_collect_data(self):
         cur = self.dbconn.cursor()
-        cur.execute("""SET search_path TO %s""", (self.profiler_namespace, ))
+        cur.execute(
+            sql.SQL("SET search_path TO {}").format(sql.Identifier(self.profiler_namespace))
+        )
         cur.execute("""SELECT pl_profiler_collect_data()""")
         cur.execute("""RESET search_path""")
         self.dbconn.commit()
@@ -973,7 +1008,7 @@ class plprofiler:
 
     def execute_sql(self, sql, output = None):
         try:
-            cur = self.dbconn.cursor()
+            cur = psycopg.ClientCursor(self.dbconn)
             for query in sql_split(sql).get_statements():
                 if output is not None:
                     output.write(query + '\n')
