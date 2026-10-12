@@ -253,7 +253,7 @@ class plprofiler:
                                 WHERE s_name = %s""", (opt_name, ))
             cur.execute("""INSERT INTO pl_profiler_saved
                                 (s_name, s_options, s_callgraph_overflow,
-                                 s_function_overflow, s_lines_overflow)
+                                 s_functions_overflow, s_lines_overflow)
                             VALUES (%s, %s, %s, %s, %s)""",
                         (opt_name, json.dumps(config),
                          report_data['callgraph_overflow'],
