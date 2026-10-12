@@ -681,7 +681,9 @@ profiler_shmem_startup(void)
 	hash_ctl.hash = line_hash_fn;
 	hash_ctl.match = line_match_fn;
 	functions_shared = ShmemInitHash("plprofiler functions",
+#if PG_VERSION_NUM < 190000
 									 profiler_max_functions,
+#endif
 									 profiler_max_functions,
 									 &hash_ctl,
 									 HASH_ELEM | HASH_FUNCTION | HASH_COMPARE);
@@ -693,7 +695,9 @@ profiler_shmem_startup(void)
 	hash_ctl.hash = callgraph_hash_fn;
 	hash_ctl.match = callgraph_match_fn;
 	callgraph_shared = ShmemInitHash("plprofiler callgraph",
+#if PG_VERSION_NUM < 190000
 									  profiler_max_callgraph,
+#endif
 									  profiler_max_callgraph,
 									  &hash_ctl,
 									  HASH_ELEM | HASH_FUNCTION | HASH_COMPARE);
