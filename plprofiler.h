@@ -40,6 +40,8 @@
 #include "pgstat.h"
 #include "plpgsql.h"
 #include "storage/ipc.h"
+#include "storage/lwlock.h"
+#include "storage/shmem.h"
 #include "storage/spin.h"
 #include "utils/array.h"
 #include "utils/builtins.h"
@@ -49,6 +51,7 @@
 #include "utils/memutils.h"
 #include "utils/palloc.h"
 #include "utils/syscache.h"
+#include "utils/tuplestore.h"
 
 PG_MODULE_MAGIC;
 
@@ -161,7 +164,7 @@ typedef struct callGraphEntry
 
 typedef struct
 {
-	LWLockId			lock;
+	LWLock			   *lock;
 	bool				profiler_enabled_global;
 	int					profiler_enabled_pid;
 	int					profiler_collect_interval;
