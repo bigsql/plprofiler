@@ -108,9 +108,9 @@ def save_command(argv):
     for opt, val in opts:
         if opt in ['-d', '--dbname']:
             if val.find('=') < 0:
-                connoptions['database'] = val
+                connoptions['dbname'] = val
             else:
-                connoptions['dsn'] = val
+                connoptions['conninfo'] = val
         elif opt in ['-h', '--host']:
             connoptions['host'] = val
         elif opt in ['-p', '--port']:
@@ -197,9 +197,9 @@ def list_command(argv):
     for opt, val in opts:
         if opt in ['-d', '--dbname']:
             if val.find('=') < 0:
-                connoptions['database'] = val
+                connoptions['dbname'] = val
             else:
-                connoptions['dsn'] = val
+                connoptions['conninfo'] = val
         elif opt in ['-h', '--host']:
             connoptions['host'] = val
         elif opt in ['-p', '--port']:
@@ -262,9 +262,9 @@ def edit_command(argv):
     for opt, val in opts:
         if opt in ['-d', '--dbname']:
             if val.find('=') < 0:
-                connoptions['database'] = val
+                connoptions['dbname'] = val
             else:
-                connoptions['dsn'] = val
+                connoptions['conninfo'] = val
         elif opt in ['-h', '--host']:
             connoptions['host'] = val
         elif opt in ['-p', '--port']:
@@ -335,9 +335,9 @@ def delete_command(argv):
     for opt, val in opts:
         if opt in ['-d', '--dbname']:
             if val.find('=') < 0:
-                connoptions['database'] = val
+                connoptions['dbname'] = val
             else:
-                connoptions['dsn'] = val
+                connoptions['conninfo'] = val
         elif opt in ['-h', '--host']:
             connoptions['host'] = val
         elif opt in ['-p', '--port']:
@@ -386,9 +386,9 @@ def reset_command(argv):
     for opt, val in opts:
         if opt in ['-d', '--dbname']:
             if val.find('=') < 0:
-                connoptions['database'] = val
+                connoptions['dbname'] = val
             else:
-                connoptions['dsn'] = val
+                connoptions['conninfo'] = val
         elif opt in ['-h', '--host']:
             connoptions['host'] = val
         elif opt in ['-p', '--port']:
@@ -436,9 +436,9 @@ def report_command(argv):
     for opt, val in opts:
         if opt in ['-d', '--dbname']:
             if val.find('=') < 0:
-                connoptions['database'] = val
+                connoptions['dbname'] = val
             else:
-                connoptions['dsn'] = val
+                connoptions['conninfo'] = val
         elif opt in ['-h', '--host']:
             connoptions['host'] = val
         elif opt in ['-p', '--port']:
@@ -542,9 +542,9 @@ def export_command(argv):
     for opt, val in opts:
         if opt in ['-d', '--dbname']:
             if val.find('=') < 0:
-                connoptions['database'] = val
+                connoptions['dbname'] = val
             else:
-                connoptions['dsn'] = val
+                connoptions['conninfo'] = val
         elif opt in ['-h', '--host']:
             connoptions['host'] = val
         elif opt in ['-p', '--port']:
@@ -657,9 +657,9 @@ def import_command(argv):
     for opt, val in opts:
         if opt in ['-d', '--dbname']:
             if val.find('=') < 0:
-                connoptions['database'] = val
+                connoptions['dbname'] = val
             else:
-                connoptions['dsn'] = val
+                connoptions['conninfo'] = val
         elif opt in ['-h', '--host']:
             connoptions['host'] = val
         elif opt in ['-p', '--port']:
@@ -743,9 +743,9 @@ def run_command(argv):
     for opt, val in opts:
         if opt in ['-d', '--dbname']:
             if val.find('=') < 0:
-                connoptions['database'] = val
+                connoptions['dbname'] = val
             else:
-                connoptions['dsn'] = val
+                connoptions['conninfo'] = val
         elif opt in ['-h', '--host']:
             connoptions['host'] = val
         elif opt in ['-p', '--port']:
@@ -868,9 +868,9 @@ def monitor_command(argv):
     for opt, val in opts:
         if opt in ['-d', '--dbname']:
             if val.find('=') < 0:
-                connoptions['database'] = val
+                connoptions['dbname'] = val
             else:
-                connoptions['dsn'] = val
+                connoptions['conninfo'] = val
         elif opt in ['-h', '--host']:
             connoptions['host'] = val
         elif opt in ['-p', '--port']:
